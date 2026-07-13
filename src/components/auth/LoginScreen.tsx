@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { TextField } from '../ui/TextField';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 
 function ShieldIcon() {
   return (
@@ -57,12 +58,29 @@ function LockIcon() {
   );
 }
 
-export function LoginScreen() {
-  const [values, setValues] = useState({ institutionId: '', clinicianId: '', passcode: '' });
+interface LoginScreenProps {
+  onLogin: (role: 'admin' | 'staff') => void;
+}
+
+type AuthRole = 'admin' | 'staff';
+
+interface LoginScreenState {
+  institutionEmail: string;
+  clinicianId: string;
+  password: string;
+}
+
+export function LoginScreen({ onLogin }: LoginScreenProps) {
+  const [values, setValues] = useState<LoginScreenState>({
+    institutionEmail: import.meta.env.VITE_ADMIN_EMAIL ?? 'calebasamu47@gmail.com',
+    clinicianId: import.meta.env.VITE_ADMIN_CLINICIAN_ID ?? 'Admin 42AD',
+    password: '',
+  });
   const [showPasscode, setShowPasscode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
-  const handleChange = (field: 'institutionId' | 'clinicianId' | 'passcode') =>
+  const handleChange = (field: 'institutionEmail' | 'clinicianId' | 'password') =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
       setValues((current) => ({ ...current, [field]: event.target.value }));
     };
@@ -70,8 +88,49 @@ export function LoginScreen() {
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    setMessage(null);
+
+    if (!isSupabaseConfigured) {
+      setMessage('Supabase is not ready yet. Please confirm the values in .env and restart the dev server if needed.');
+      setSubmitting(false);
+      return;
+    }
+
+    const loginEmail = values.institutionEmail.trim() || import.meta.env.VITE_ADMIN_EMAIL || 'calebasamu47@gmail.com';
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail,
+      password: values.password,
+    });
+
     setSubmitting(false);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    const otpResponse = await supabase.auth.signInWithOtp({
+      email: loginEmail,
+      options: {
+        shouldCreateUser: false,
+      },
+    });
+
+    if (otpResponse.error) {
+      setMessage(`Signed in, but the OTP email could not be sent: ${otpResponse.error.message}`);
+      return;
+    }
+
+    const metadataRole = data.user?.user_metadata?.role;
+    const inferredRole: AuthRole = metadataRole === 'admin'
+      || loginEmail === import.meta.env.VITE_ADMIN_EMAIL
+      || values.clinicianId === import.meta.env.VITE_ADMIN_CLINICIAN_ID
+      || values.clinicianId.includes('Admin')
+      ? 'admin'
+      : 'staff';
+
+    onLogin(inferredRole);
   };
 
   return (
@@ -90,12 +149,13 @@ export function LoginScreen() {
 
         <form onSubmit={handleSubmit} className="login-form" noValidate>
           <TextField
-            label="Institution ID"
-            placeholder="Enter ID"
-            value={values.institutionId}
-            onChange={handleChange('institutionId')}
+            label="Institution Email"
+            placeholder="Enter institution email"
+            value={values.institutionEmail}
+            onChange={handleChange('institutionEmail')}
             startIcon={<InstitutionIcon />}
-            autoComplete="organization"
+            autoComplete="email"
+            type="email"
           />
 
           <TextField
@@ -108,10 +168,10 @@ export function LoginScreen() {
           />
 
           <TextField
-            label="Passcode"
+            label="Password"
             placeholder="•••••••••"
-            value={values.passcode}
-            onChange={handleChange('passcode')}
+            value={values.password}
+            onChange={handleChange('password')}
             type={showPasscode ? 'text' : 'password'}
             startIcon={<LockIcon />}
             endIcon={<button type="button" className="icon-button" onClick={() => setShowPasscode((current) => !current)}>{<EyeIcon visible={showPasscode} />}</button>}
@@ -121,9 +181,9 @@ export function LoginScreen() {
           <Button type="submit" className="login-submit" loading={submitting} icon={<LockIcon />}>
             Authenticate Session
           </Button>
-        </form>
 
-       
+          {message ? <p className="login-note">{message}</p> : null}
+        </form>
       </div>
 
       <div className="login-note">End-to-End TLS 1.3 Encryption Active</div>

@@ -1,5 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { SideNavBar } from '../layout/SideNavBar';
+import type { PatientRecordItem } from '../../types';
+
+interface DashboardScreenProps {
+  records: PatientRecordItem[];
+  onRecordAdd: (record: PatientRecordItem) => void;
+  onRecordClick: (recordId: string) => void;
+}
 
 // SVG Icons
 function CloudUploadIcon() {
@@ -44,41 +51,6 @@ function MoreActionsIcon() {
   );
 }
 
-interface Record {
-  id: string;
-  patient: {
-    initials: string;
-    name: string;
-  };
-  sensitivity: string;
-  status: string;
-  encryption: string;
-}
-
-const MOCK_RECORDS: Record[] = [
-  {
-    id: 'EHR-992-A',
-    patient: { initials: 'JD', name: 'Doe, John' },
-    sensitivity: 'Restricted',
-    status: 'Encrypted',
-    encryption: 'Encrypted',
-  },
-  {
-    id: 'EHR-841-B',
-    patient: { initials: 'AS', name: 'Smith, Alice' },
-    sensitivity: 'Normal',
-    status: 'Verified',
-    encryption: 'Verified',
-  },
-  {
-    id: 'EHR-773-C',
-    patient: { initials: 'MR', name: 'Rivera, Marcus' },
-    sensitivity: 'Restricted',
-    status: 'Processing',
-    encryption: 'Processing',
-  },
-];
-
 function StatusBadge({ status }: { status: string }) {
   const colors: { [key: string]: { bg: string; text: string } } = {
     Restricted: { bg: 'rgba(186, 26, 26, 0.1)', text: '#BA1A1A' },
@@ -119,21 +91,73 @@ function EncryptionStatus({ status }: { status: string }) {
   );
 }
 
-export function DashboardScreen() {
-  const [_searchQuery, setSearchQuery] = useState('');
+export function DashboardScreen({ records, onRecordAdd, onRecordClick }: DashboardScreenProps) {
+  const [searchQuery, setSearchQuery] = useState('');
   const [uploadProgress] = useState(78); // 78% complete for demo
+  const [patientName, setPatientName] = useState('');
+  const [department, setDepartment] = useState('Cardiology');
+  const [sensitivity, setSensitivity] = useState('Normal');
   const [isMobile, setIsMobile] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
+    const query = '(max-width: 767px)';
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+
+    setIsMobile(mediaQuery.matches);
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', handleChange);
+    } else {
+      mediaQuery.addListener(handleChange);
+    }
+
+    return () => {
+      if (mediaQuery.removeEventListener) {
+        mediaQuery.removeEventListener('change', handleChange);
+      } else {
+        mediaQuery.removeListener(handleChange);
+      }
+    };
+  }, []);
+
+  const filteredRecords = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return records;
+    return records.filter((record) => {
+      const haystack = [record.id, record.patient.name, record.department ?? '', record.author ?? '', record.sensitivity, record.status]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [records, searchQuery]);
+
+  const handleSubmit = () => {
+    if (!patientName.trim()) return;
+
+    const newRecord: PatientRecordItem = {
+      id: `REC-${Date.now().toString().slice(-4)}`,
+      patient: {
+        initials: patientName
+          .split(' ')
+          .slice(0, 2)
+          .map((part) => part[0]?.toUpperCase() ?? '')
+          .join(''),
+        name: patientName.trim(),
+      },
+      sensitivity: sensitivity,
+      status: 'Encrypted',
+      encryption: 'Encrypted',
+      department,
+      date: new Date().toLocaleDateString(),
+      author: 'Current User',
     };
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    onRecordAdd(newRecord);
+    setPatientName('');
+    setDepartment('Cardiology');
+    setSensitivity('Normal');
+  };
 
   if (isMobile) {
     return (
@@ -169,7 +193,7 @@ export function DashboardScreen() {
             <input
               type="text"
               placeholder="Search patient ID or records..."
-              value={_searchQuery}
+              value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="mobile-search-input"
             />
@@ -203,6 +227,70 @@ export function DashboardScreen() {
                   <span>AES-256</span>
                 </div>
               </div>
+              {/* Upload Area (mobile) */}
+              <div className="upload-area">
+                <div className="upload-icon-container">
+                  <CloudUploadIcon />
+                </div>
+                <h3 className="upload-heading">Drag & Drop Secure File</h3>
+                <p className="upload-description">
+                  DICOM, PDF, HL7 supported. Max 500MB.
+                </p>
+                <button type="button" className="btn-select-file">
+                  Select File
+                </button>
+              </div>
+
+              {/* Ingestion form */}
+              <div className="ingest-form">
+                <label className="ingest-label">
+                  Patient Name
+                  <input
+                    type="text"
+                    className="ingest-input"
+                    placeholder="e.g. Jane Doe"
+                    value={patientName}
+                    onChange={(e) => setPatientName(e.target.value)}
+                  />
+                </label>
+
+                <label className="ingest-label">
+                  Department
+                  <select
+                    className="ingest-select"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                  >
+                    <option value="Cardiology">Cardiology</option>
+                    <option value="Radiology">Radiology</option>
+                    <option value="Oncology">Oncology</option>
+                    <option value="Pharmacy">Pharmacy</option>
+                  </select>
+                </label>
+
+                <label className="ingest-label">
+                  Sensitivity Level
+                  <select
+                    className="ingest-select"
+                    value={sensitivity}
+                    onChange={(e) => setSensitivity(e.target.value)}
+                  >
+                    <option>Normal</option>
+                    <option>Restricted</option>
+                    <option>Highly Restricted</option>
+                  </select>
+                </label>
+
+                <div className="ingest-actions">
+                  <button
+                    type="button"
+                    className="btn-submit"
+                    onClick={handleSubmit}
+                  >
+                    Submit
+                  </button>
+                </div>
+              </div>
               <p className="sync-subtitle">End-to-End Encrypted Tunnel</p>
               <div className="sync-progress-section">
                 <div className="sync-progress-header">
@@ -226,8 +314,14 @@ export function DashboardScreen() {
 
             {/* Records List */}
             <div className="mobile-records-list">
-              {MOCK_RECORDS.map((record) => (
-                <div key={record.id} className="mobile-record-card">
+              {filteredRecords.map((record) => (
+                <div
+                  key={record.id}
+                  className="mobile-record-card"
+                  onClick={() => onRecordClick(record.id)}
+                  role="button"
+                  tabIndex={0}
+                >
                   <div className="record-card-left">
                     <div className="record-avatar">{record.patient.initials}</div>
                     <div className="record-info">
@@ -272,7 +366,7 @@ export function DashboardScreen() {
             <input
               type="text"
               placeholder="Search EHR (Name, ID, Date)..."
-              value={_searchQuery}
+              value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="search-input"
             />
@@ -299,6 +393,57 @@ export function DashboardScreen() {
                 <button type="button" className="btn-select-file">
                   Select File
                 </button>
+              </div>
+
+              {/* Ingestion form (desktop) */}
+              <div className="ingest-form">
+                <label className="ingest-label">
+                  Patient Name
+                  <input
+                    type="text"
+                    className="ingest-input"
+                    placeholder="e.g. Jane Doe"
+                    value={patientName}
+                    onChange={(e) => setPatientName(e.target.value)}
+                  />
+                </label>
+
+                <label className="ingest-label">
+                  Department
+                  <select
+                    className="ingest-select"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                  >
+                    <option value="Cardiology">Cardiology</option>
+                    <option value="Radiology">Radiology</option>
+                    <option value="Oncology">Oncology</option>
+                    <option value="Pharmacy">Pharmacy</option>
+                  </select>
+                </label>
+
+                <label className="ingest-label">
+                  Sensitivity Level
+                  <select
+                    className="ingest-select"
+                    value={sensitivity}
+                    onChange={(e) => setSensitivity(e.target.value)}
+                  >
+                    <option>Normal</option>
+                    <option>Restricted</option>
+                    <option>Highly Restricted</option>
+                  </select>
+                </label>
+
+                <div className="ingest-actions">
+                  <button
+                    type="button"
+                    className="btn-submit"
+                    onClick={handleSubmit}
+                  >
+                    Submit
+                  </button>
+                </div>
               </div>
 
               {/* Progress State */}
@@ -348,8 +493,13 @@ export function DashboardScreen() {
                   </tr>
                 </thead>
                 <tbody>
-                  {MOCK_RECORDS.map((record, index) => (
-                    <tr key={record.id} className={index > 0 ? 'table-body-row border-top' : 'table-body-row'}>
+                  {filteredRecords.map((record, index) => (
+                    <tr
+                  key={record.id}
+                  className={index > 0 ? 'table-body-row border-top' : 'table-body-row'}
+                  onClick={() => onRecordClick(record.id)}
+                  style={{ cursor: 'pointer' }}
+                >
                       <td className="table-cell table-cell-record-id">
                         <span className="record-id-mono">{record.id}</span>
                       </td>

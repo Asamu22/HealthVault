@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react';
+import { supabase } from '../../lib/supabase';
 
 function ShieldBadgeIcon() {
   return (
@@ -29,12 +30,17 @@ function HelpIcon() {
   );
 }
 
-export function MfaChallengeScreen() {
+interface MfaChallengeScreenProps {
+  onVerified: () => void;
+}
+
+export function MfaChallengeScreen({ onVerified }: MfaChallengeScreenProps) {
   const [values, setValues] = useState<string[]>(Array(6).fill(''));
   const [activeIndex, setActiveIndex] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(180);
   const [submitting, setSubmitting] = useState(false);
   const [resendActive, setResendActive] = useState(false);
+  const [notice, setNotice] = useState('We sent a one-time code to your registered email address.');
   const [helpOpen] = useState(false);
 
   const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
@@ -49,6 +55,34 @@ export function MfaChallengeScreen() {
     }, 1000);
 
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const sendOtpToEmail = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const email = session?.user?.email;
+
+      if (!email) {
+        setNotice('No email is available for this session yet.');
+        return;
+      }
+
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: false,
+        },
+      });
+
+      if (error) {
+        setNotice(`The OTP email could not be sent: ${error.message}`);
+        return;
+      }
+
+      setNotice(`A one-time code request was accepted for ${email}. If you still receive a magic link, the Supabase email template needs to include the OTP token placeholder.`);
+    };
+
+    sendOtpToEmail();
   }, []);
 
   const handleChange = (index: number) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -113,8 +147,30 @@ export function MfaChallengeScreen() {
     event.preventDefault();
     if (!isComplete) return;
     setSubmitting(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const email = session?.user?.email;
+
+    if (!email) {
+      setSubmitting(false);
+      window.alert('Unable to verify the code without an active account session.');
+      return;
+    }
+
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: code,
+      type: 'email',
+    });
+
     setSubmitting(false);
+
+    if (!error) {
+      onVerified();
+      return;
+    }
+
+    setNotice(error.message);
   };
 
   const handleResend = () => {
@@ -137,8 +193,8 @@ export function MfaChallengeScreen() {
         <div className="mfa-brand-icon">
           <ShieldBadgeIcon />
         </div>
-        <h1>Verification Required</h1>
-        <p>Please enter the 6-digit code sent to your registered authenticator app to access patient records.</p>
+        <h1>Reauthentication Required</h1>
+        <p>Please enter the 6-digit code sent to your registered email address to continue accessing patient records.</p>
 
         <form className="mfa-form" onSubmit={handleSubmit} noValidate>
           <div className="mfa-otp-grid">
@@ -172,8 +228,10 @@ export function MfaChallengeScreen() {
           </div>
 
           <button className="btn btn-primary mfa-submit" type="submit" disabled={!isComplete || submitting}>
-            Verify Identity
+            Complete Reauthentication
           </button>
+
+          {notice ? <p className="login-note" style={{ marginTop: '0.75rem' }}>{notice}</p> : null}
         </form>
 
         <div className="mfa-encryption-pill">

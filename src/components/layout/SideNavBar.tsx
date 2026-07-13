@@ -31,6 +31,16 @@ function AuditLogsIcon() {
   );
 }
 
+function UsersIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M6 7.5C6 9.15685 7.34315 10.5 9 10.5C10.6569 10.5 12 9.15685 12 7.5C12 5.84315 10.6569 4.5 9 4.5C7.34315 4.5 6 5.84315 6 7.5Z" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2 16.5C2 13.7386 4.23858 11.5 7 11.5H11C13.7614 11.5 16 13.7386 16 16.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M6 16.5C6 14.8431 7.34315 13.5 9 13.5H11C12.6569 13.5 14 14.8431 14 16.5" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 function AccessControlIcon() {
   return (
     <svg width="18" height="20" viewBox="0 0 18 20" fill="none" aria-hidden="true">
@@ -99,9 +109,23 @@ interface SideNavBarProps {
   mobile?: boolean;
   isOpen?: boolean;
   onClose?: () => void;
+  activeScreen?: string;
+  role?: 'admin' | 'staff';
+  onNavigate?: (screen: string) => void;
 }
 
-export function SideNavBar({ mobile = false, isOpen = true, onClose }: SideNavBarProps) {
+export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScreen = 'dashboard', role = 'admin', onNavigate }: SideNavBarProps) {
+  const mainNavItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
+    { id: 'records', label: 'Patient Records', icon: <PatientRecordsIcon /> },
+    { id: 'users', label: 'Users', icon: <UsersIcon /> },
+    { id: 'audit', label: 'Audit Logs', icon: <AuditLogsIcon /> },
+    { id: 'access', label: 'Access Control', icon: <AccessControlIcon /> },
+    { id: 'settings', label: 'Settings', icon: <SettingsIcon /> },
+  ];
+
+  const visibleMainItems = role === 'admin' ? mainNavItems : mainNavItems.filter((item) => ['dashboard', 'records', 'settings'].includes(item.id));
+
   return (
     <aside className={`side-nav-bar ${mobile ? 'side-nav-bar-mobile' : ''} ${mobile && isOpen ? 'side-nav-bar-open' : ''}`}>
       {mobile && (
@@ -116,7 +140,7 @@ export function SideNavBar({ mobile = false, isOpen = true, onClose }: SideNavBa
         </div>
         <div className="side-nav-user-info">
           <h2 className="side-nav-user-name">Dr. Julian Vane</h2>
-          <p className="side-nav-user-role">Clinician | Cardiology</p>
+          <p className="side-nav-user-role">{role === 'admin' ? 'Admin | Full Access' : 'Staff | Limited Access'}</p>
         </div>
       </div>
 
@@ -130,18 +154,18 @@ export function SideNavBar({ mobile = false, isOpen = true, onClose }: SideNavBa
 
       {/* Main Navigation */}
       <nav className="side-nav-menu">
-        <NavLink icon={<DashboardIcon />} label="Dashboard" active={true} />
-        <NavLink icon={<PatientRecordsIcon />} label="Patient Records" />
-        <NavLink icon={<AuditLogsIcon />} label="Audit Logs" />
-        <NavLink icon={<AccessControlIcon />} label="Access Control" />
-        <NavLink icon={<SettingsIcon />} label="Settings" />
+        {visibleMainItems.map((item) => (
+          <NavLink key={item.id} icon={item.icon} label={item.label} active={activeScreen === item.id} onClick={() => onNavigate?.(item.id)} />
+        ))}
       </nav>
 
       {/* Footer Navigation */}
-      <div className="side-nav-footer">
-        <NavLink icon={<SecurityCenterIcon />} label="Security Center" />
-        <NavLink icon={<SupportIcon />} label="Support" />
-      </div>
+      {role === 'admin' ? (
+        <div className="side-nav-footer">
+          <NavLink icon={<SecurityCenterIcon />} label="Security Center" />
+          <NavLink icon={<SupportIcon />} label="Support" />
+        </div>
+      ) : null}
     </aside>
   );
 }
