@@ -60,6 +60,15 @@ function SettingsIcon() {
   );
 }
 
+function PoliciesIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <rect x="1" y="1" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4 6h10M4 9h7M4 12h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function SecurityCenterIcon() {
   return (
     <svg width="16" height="20" viewBox="0 0 16 20" fill="none" aria-hidden="true">
@@ -81,6 +90,14 @@ function UploadIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
       <path d="M6 2v6M3 5l3-3 3 3M2 10h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M11.6667 14.1667L15.8333 10L11.6667 5.83333M15.8333 10H5M7.5 17.5H4.16667C3.72464 17.5 3.30072 17.3244 2.98816 17.0118C2.67559 16.6993 2.5 16.2754 2.5 15.8333V4.16667C2.5 3.72464 2.67559 3.30072 2.98816 2.98816C3.30072 2.67559 3.72464 2.5 4.16667 2.5H7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -112,15 +129,17 @@ interface SideNavBarProps {
   activeScreen?: string;
   role?: 'admin' | 'staff';
   onNavigate?: (screen: string) => void;
+  onLogout?: () => void;
 }
 
-export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScreen = 'dashboard', role = 'admin', onNavigate }: SideNavBarProps) {
+export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScreen = 'dashboard', role = 'admin', onNavigate, onLogout }: SideNavBarProps) {
   const mainNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
     { id: 'records', label: 'Patient Records', icon: <PatientRecordsIcon /> },
     { id: 'users', label: 'Users', icon: <UsersIcon /> },
     { id: 'audit', label: 'Audit Logs', icon: <AuditLogsIcon /> },
     { id: 'access', label: 'Access Control', icon: <AccessControlIcon /> },
+    { id: 'policies', label: 'Policies', icon: <PoliciesIcon /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon /> },
   ];
 
@@ -160,12 +179,15 @@ export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScree
       </nav>
 
       {/* Footer Navigation */}
-      {role === 'admin' ? (
-        <div className="side-nav-footer">
-          <NavLink icon={<SecurityCenterIcon />} label="Security Center" />
-          <NavLink icon={<SupportIcon />} label="Support" />
-        </div>
-      ) : null}
+      <div className="side-nav-footer">
+        {role === 'admin' && (
+          <>
+            <NavLink icon={<SecurityCenterIcon />} label="Security Center" />
+            <NavLink icon={<SupportIcon />} label="Support" />
+          </>
+        )}
+        <NavLink icon={<LogoutIcon />} label="Log Out" onClick={onLogout} />
+      </div>
     </aside>
   );
 }

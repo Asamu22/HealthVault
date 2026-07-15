@@ -1,11 +1,14 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import type { ChangeEvent } from 'react';
 import { SideNavBar } from '../layout/SideNavBar';
 import type { PatientRecordItem } from '../../types';
+import { uploadPatientPdf } from '../../lib/supabase';
 
 interface DashboardScreenProps {
   records: PatientRecordItem[];
   onRecordAdd: (record: PatientRecordItem) => void;
   onRecordClick: (recordId: string) => void;
+  onViewFullLog: () => void;
 }
 
 // SVG Icons
@@ -91,14 +94,37 @@ function EncryptionStatus({ status }: { status: string }) {
   );
 }
 
-export function DashboardScreen({ records, onRecordAdd, onRecordClick }: DashboardScreenProps) {
+export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFullLog }: DashboardScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [uploadProgress] = useState(78); // 78% complete for demo
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [patientName, setPatientName] = useState('');
   const [department, setDepartment] = useState('Cardiology');
   const [sensitivity, setSensitivity] = useState('Normal');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const triggerFileSelect = () => fileInputRef.current?.click();
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    if (!file) {
+      setSelectedFile(null);
+      setUploadError('No file selected. Please choose a PDF file to upload.');
+      return;
+    }
+
+    if (file.type !== 'application/pdf') {
+      setUploadError('Only PDF files are allowed.');
+      setSelectedFile(null);
+      return;
+    }
+
+    setSelectedFile(file);
+    setUploadError(null);
+  };
 
   useEffect(() => {
     const query = '(max-width: 767px)';
@@ -132,11 +158,27 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
     });
   }, [records, searchQuery]);
 
-  const handleSubmit = () => {
-    if (!patientName.trim()) return;
+  const handleSubmit = async () => {
+    if (!patientName.trim() || !selectedFile) {
+      setUploadError('Please provide a patient name and select a PDF file.');
+      return;
+    }
+
+    if (selectedFile.type !== 'application/pdf') {
+      setUploadError('Only PDF files are allowed.');
+      return;
+    }
+
+    setUploadError(null);
+    setIsUploading(true);
+    setUploadProgress(10);
+
+    const recordId = `REC-${Date.now().toString().slice(-4)}`;
+    const filePath = `records/${recordId}/${selectedFile.name}`;
+    const createdAt = new Date().toISOString();
 
     const newRecord: PatientRecordItem = {
-      id: `REC-${Date.now().toString().slice(-4)}`,
+      id: recordId,
       patient: {
         initials: patientName
           .split(' ')
@@ -145,18 +187,32 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
           .join(''),
         name: patientName.trim(),
       },
-      sensitivity: sensitivity,
+      sensitivity,
       status: 'Encrypted',
-      encryption: 'Encrypted',
+      encryption: 'AES-GCM',
       department,
       date: new Date().toLocaleDateString(),
       author: 'Current User',
+      filePath,
+      fileName: selectedFile.name,
+      createdAt,
     };
 
-    onRecordAdd(newRecord);
-    setPatientName('');
-    setDepartment('Cardiology');
-    setSensitivity('Normal');
+    try {
+      setUploadProgress(60);
+      const savedRecord = await uploadPatientPdf(selectedFile, newRecord);
+      setUploadProgress(100);
+      onRecordAdd(savedRecord);
+      setPatientName('');
+      setDepartment('Cardiology');
+      setSensitivity('Normal');
+      setSelectedFile(null);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsUploading(false);
+      window.setTimeout(() => setUploadProgress(0), 800);
+    }
   };
 
   if (isMobile) {
@@ -232,13 +288,20 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
                 <div className="upload-icon-container">
                   <CloudUploadIcon />
                 </div>
-                <h3 className="upload-heading">Drag & Drop Secure File</h3>
+                <h3 className="upload-heading">Secure PDF upload</h3>
                 <p className="upload-description">
-                  DICOM, PDF, HL7 supported. Max 500MB.
+                  Upload patient reports as encrypted PDF files. Max 500MB.
                 </p>
-                <button type="button" className="btn-select-file">
-                  Select File
+                <button type="button" className="btn-select-file" onClick={triggerFileSelect}>
+                  {selectedFile ? selectedFile.name : 'Select PDF'}
                 </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="sr-only"
+                  onChange={handleFileChange}
+                />
               </div>
 
               {/* Ingestion form */}
@@ -309,12 +372,12 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
           <section className="mobile-records-section">
             <div className="mobile-records-header">
               <h2 className="records-title">Recent Records</h2>
-              <button type="button" className="view-all-link">View All</button>
+              <button type="button" className="view-all-link" onClick={onViewFullLog}>View All</button>
             </div>
 
             {/* Records List */}
             <div className="mobile-records-list">
-              {filteredRecords.map((record) => (
+              {filteredRecords.slice(0, 5).map((record) => (
                 <div
                   key={record.id}
                   className="mobile-record-card"
@@ -386,14 +449,22 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
                 <div className="upload-icon-container">
                   <CloudUploadIcon />
                 </div>
-                <h3 className="upload-heading">Drag & Drop Secure File</h3>
+                <h3 className="upload-heading">Secure PDF upload</h3>
                 <p className="upload-description">
-                  DICOM, PDF, HL7 supported. Max 500MB.
+                  Upload patient reports as encrypted PDF files. Max 500MB.
                 </p>
-                <button type="button" className="btn-select-file">
-                  Select File
+                <button type="button" className="btn-select-file" onClick={triggerFileSelect}>
+                  {selectedFile ? selectedFile.name : 'Select PDF'}
                 </button>
               </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                className="sr-only"
+                onChange={handleFileChange}
+              />
 
               {/* Ingestion form (desktop) */}
               <div className="ingest-form">
@@ -472,7 +543,7 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
           <section className="dashboard-section recent-records-section">
             <div className="section-header">
               <h2 className="section-title">Recent Records Log</h2>
-              <button type="button" className="btn-view-full">
+              <button type="button" className="btn-view-full" onClick={onViewFullLog}>
                 <span>View Full Log</span>
                 <svg width="10.67" height="10.67" viewBox="0 0 12 12" fill="none" aria-hidden="true">
                   <path d="M5 2l4 4-4 4" stroke="#003D9B" strokeWidth="1.5" strokeLinecap="round" />
@@ -493,7 +564,7 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick }: Dashboa
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRecords.map((record, index) => (
+                  {filteredRecords.slice(0, 5).map((record, index) => (
                     <tr
                   key={record.id}
                   className={index > 0 ? 'table-body-row border-top' : 'table-body-row'}

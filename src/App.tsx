@@ -8,44 +8,14 @@ import { PatientRecordScreen } from './components/dashboard/PatientRecordScreen'
 import { PatientRecordsScreen } from './components/dashboard/PatientRecordsScreen';
 import { UsersManagementScreen } from './components/users/UsersManagementScreen';
 import { AccessControlScreen } from './components/access/AccessControlScreen';
+import { PoliciesScreen } from './components/access/PoliciesScreen';
 import type { PatientRecordItem } from './types';
-import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { supabase, fetchPatientRecords } from './lib/supabase';
+import { clearStoredOtpEmail } from './lib/otp';
 
 type AppRole = 'admin' | 'staff';
-type AppScreen = 'dashboard' | 'records' | 'users' | 'audit' | 'access' | 'settings';
+type AppScreen = 'dashboard' | 'records' | 'users' | 'audit' | 'access' | 'policies' | 'settings';
 
-const INITIAL_RECORDS: PatientRecordItem[] = [
-  {
-    id: 'EHR-992-A',
-    patient: { initials: 'JD', name: 'Doe, John' },
-    sensitivity: 'Restricted',
-    status: 'Encrypted',
-    encryption: 'Encrypted',
-    department: 'Cardiology',
-    date: '2024-11-01',
-    author: 'Dr. A. Chen',
-  },
-  {
-    id: 'EHR-841-B',
-    patient: { initials: 'AS', name: 'Smith, Alice' },
-    sensitivity: 'Normal',
-    status: 'Verified',
-    encryption: 'Verified',
-    department: 'Oncology',
-    date: '2024-10-14',
-    author: 'Dr. L. Park',
-  },
-  {
-    id: 'EHR-773-C',
-    patient: { initials: 'MR', name: 'Rivera, Marcus' },
-    sensitivity: 'Restricted',
-    status: 'Processing',
-    encryption: 'Processing',
-    department: 'Neurology',
-    date: '2024-09-22',
-    author: 'Dr. R. Singh',
-  },
-];
 
 function SettingsView() {
   return (
@@ -58,16 +28,20 @@ function SettingsView() {
 
 function App() {
   const [activeRole, setActiveRole] = useState<AppRole | null>(null);
+  const [needsMfa, setNeedsMfa] = useState(false);
+  const [sessionRestored, setSessionRestored] = useState(false);
   const isAuthenticated = activeRole !== null;
   const isAdmin = activeRole === 'admin';
   const [isMobile, setIsMobile] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [selectedScreen, setSelectedScreen] = useState<AppScreen>('dashboard');
-  const [records, setRecords] = useState<PatientRecordItem[]>(INITIAL_RECORDS);
-  const [needsMfa, setNeedsMfa] = useState(false);
+  const [records, setRecords] = useState<PatientRecordItem[]>([]);
+  const [recordsLoading, setRecordsLoading] = useState(true);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
-  const allowedScreens: AppScreen[] = isAdmin ? ['dashboard', 'records', 'users', 'audit', 'access', 'settings'] : ['dashboard', 'records', 'settings'];
+  const allowedScreens: AppScreen[] = isAdmin
+    ? ['dashboard', 'records', 'users', 'audit', 'access', 'policies', 'settings']
+    : ['dashboard', 'records', 'settings'];
 
   useEffect(() => {
     const query = '(max-width: 767px)';
@@ -98,34 +72,58 @@ function App() {
 
   useEffect(() => {
     const restoreSession = async () => {
-      if (!isSupabaseConfigured) {
-        return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const role = session.user?.user_metadata?.role === 'admin' ? 'admin' : 'staff';
+          setActiveRole(role);
+          setNeedsMfa(false);
+        }
+      } catch (err) {
+        console.warn('Session restore failed:', err);
       }
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const role = session.user?.user_metadata?.role === 'admin' ? 'admin' : 'staff';
-        setActiveRole(role);
-        setNeedsMfa(true);
-      }
+      setSessionRestored(true);
     };
 
     restoreSession();
   }, []);
 
+  useEffect(() => {
+    const loadRecords = async () => {
+      const remoteRecords = await fetchPatientRecords();
+      setRecords(remoteRecords);
+      setRecordsLoading(false);
+    };
+
+    loadRecords();
+  }, []);
+
+  if (!sessionRestored) {
+    return <div className="loading-screen">Restoring authentication session...</div>;
+  }
+
   if (!isAuthenticated) {
     return <LoginScreen onLogin={(role) => {
       setActiveRole(role);
-      setNeedsMfa(true);
+      setNeedsMfa(false);
       setAuthMessage(null);
     }} />;
   }
 
   if (needsMfa) {
-    return <MfaChallengeScreen onVerified={() => {
-      setNeedsMfa(false);
-      setAuthMessage(null);
-    }} />;
+    return <MfaChallengeScreen
+      onVerified={() => {
+        setNeedsMfa(false);
+        setAuthMessage(null);
+      }}
+      onCancel={async () => {
+        await supabase.auth.signOut();
+        setActiveRole(null);
+        setNeedsMfa(false);
+        clearStoredOtpEmail();
+        setAuthMessage('You have been returned to login. Please sign in again.');
+      }}
+    />;
   }
 
   const handleNavigate = (screen: string) => {
@@ -135,22 +133,32 @@ function App() {
     }
   };
 
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setActiveRole(null);
+    clearStoredOtpEmail();
+    setAuthMessage('You have successfully logged out.');
+  };
+
   const handleAddRecord = (record: PatientRecordItem) => {
     setRecords((current) => [record, ...current]);
   };
 
+  const selectedRecord = selectedRecordId ? records.find((record) => record.id === selectedRecordId) : null;
+
   const renderContent = () => {
-    if (selectedRecordId) {
-      return <PatientRecordScreen recordId={selectedRecordId} onBack={() => setSelectedRecordId(null)} />;
+    if (selectedRecord) {
+      return <PatientRecordScreen record={selectedRecord} onBack={() => setSelectedRecordId(null)} />;
     }
 
     return (
       <>
-        {selectedScreen === 'dashboard' && <DashboardScreen records={records} onRecordAdd={handleAddRecord} onRecordClick={setSelectedRecordId} />}
+        {selectedScreen === 'dashboard' && <DashboardScreen records={records} onRecordAdd={handleAddRecord} onRecordClick={setSelectedRecordId} onViewFullLog={() => setSelectedScreen('records')} />}
         {selectedScreen === 'records' && <PatientRecordsScreen records={records} onRecordClick={(id) => setSelectedRecordId(id)} />}
         {selectedScreen === 'users' && isAdmin && <UsersManagementScreen />}
         {selectedScreen === 'audit' && isAdmin && <AuditScreen onRowClick={(recordId) => setSelectedRecordId(recordId)} />}
         {selectedScreen === 'access' && isAdmin && <AccessControlScreen />}
+        {selectedScreen === 'policies' && isAdmin && <PoliciesScreen />}
         {selectedScreen === 'settings' && <SettingsView />}
       </>
     );
@@ -165,8 +173,9 @@ function App() {
           isOpen={isMobileNavOpen}
           onClose={() => setIsMobileNavOpen(false)}
           activeScreen={selectedScreen}
-          role={activeRole ?? 'user'}
+          role={activeRole ?? 'user' as AppRole}
           onNavigate={handleNavigate}
+          onLogout={handleLogout}
         />
         <div className="content-column">
           <header className="mobile-header">
@@ -199,7 +208,7 @@ function App() {
 
   return (
     <div className="app-shell-grid">
-      <SideNavBar activeScreen={selectedScreen} role={activeRole ?? 'staff'} onNavigate={handleNavigate} />
+      <SideNavBar activeScreen={selectedScreen} role={activeRole ?? 'staff'} onNavigate={handleNavigate} onLogout={handleLogout} />
       <div className="content-column">
         {authMessage ? <div className="login-note">{authMessage}</div> : null}
         {renderContent()}

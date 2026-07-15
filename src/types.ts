@@ -7,9 +7,13 @@ export interface PatientRecordItem {
   sensitivity: string;
   status: string;
   encryption: string;
-  department?: string;
-  date?: string;
-  author?: string;
+  department: string;
+  date: string;
+  author: string;
+  filePath: string;
+  fileName: string;
+  createdAt: string;
+  reportUrl?: string;
 }
 
 export interface StaffMember {
