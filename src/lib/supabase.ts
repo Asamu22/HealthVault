@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { PatientRecordItem, StaffMember } from '../types';
+import { API_URL } from './api';
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -51,7 +52,7 @@ function mapRecord(row: SupabasePatientRecord): PatientRecordItem {
 
 export async function fetchPatientRecords(): Promise<PatientRecordItem[]> {
   try {
-    const response = await fetch('/api/records/list');
+    const response = await fetch(`${API_URL}/api/records/list`);
     if (!response.ok) {
       console.warn('Failed to fetch patient records from backend:', response.status);
       return [];
@@ -107,7 +108,7 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
   formData.append('author', record.author);
   formData.append('record_id', record.id);
 
-  const response = await fetch('/api/records/upload', {
+  const response = await fetch(`${API_URL}/api/records/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -124,7 +125,7 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
 
 export function getRecordPdfUrl(filePath: string): string {
   // Backend proxy serves the PDF with Content-Disposition: inline
-  return `/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}`;
+  return `${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}`;
 }
 
 // ─── Staff Members ───────────────────────────────────────────────────────────
@@ -161,7 +162,7 @@ function mapStaff(row: SupabaseStaffMember): StaffMember {
 
 export async function fetchStaffMembers(): Promise<StaffMember[]> {
   try {
-    const response = await fetch('/api/users/list');
+    const response = await fetch(`${API_URL}/api/users/list`);
     if (!response.ok) {
       console.warn('Failed to fetch staff members from backend:', response.status);
       return [];
@@ -185,7 +186,7 @@ export interface CreateStaffPayload {
 }
 
 export async function createStaffMember(payload: CreateStaffPayload): Promise<StaffMember> {
-  const response = await fetch('/api/users/create', {
+  const response = await fetch(`${API_URL}/api/users/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -228,7 +229,7 @@ export interface EvaluateResult {
 
 export async function fetchPolicies(): Promise<AccessPolicy[]> {
   try {
-    const res = await fetch('/api/access/policies');
+    const res = await fetch(`${API_URL}/api/access/policies`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.policies as AccessPolicy[]) ?? [];
@@ -240,7 +241,7 @@ export async function fetchPolicies(): Promise<AccessPolicy[]> {
 export async function savePolicy(
   policy: Omit<AccessPolicy, 'id' | 'created_at'>,
 ): Promise<AccessPolicy> {
-  const res = await fetch('/api/access/policies', {
+  const res = await fetch(`${API_URL}/api/access/policies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(policy),
@@ -251,7 +252,7 @@ export async function savePolicy(
 }
 
 export async function deletePolicy(id: string): Promise<void> {
-  const res = await fetch(`/api/access/policies/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${API_URL}/api/access/policies/${id}`, { method: 'DELETE' });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data?.detail || 'Failed to delete policy.');
@@ -262,7 +263,7 @@ export async function updatePolicy(
   id: string,
   policy: Omit<AccessPolicy, 'id' | 'created_at'>,
 ): Promise<AccessPolicy> {
-  const res = await fetch(`/api/access/policies/${id}`, {
+  const res = await fetch(`${API_URL}/api/access/policies/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(policy),
@@ -280,7 +281,7 @@ export async function evaluateAccess(request: {
   department: string;
   environment: string;
 }): Promise<EvaluateResult> {
-  const res = await fetch('/api/access/evaluate', {
+  const res = await fetch(`${API_URL}/api/access/evaluate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -302,7 +303,7 @@ export interface AuditLogItem {
 
 export async function fetchAuditLogs(): Promise<AuditLogItem[]> {
   try {
-    const res = await fetch('/api/audit');
+    const res = await fetch(`${API_URL}/api/audit`);
     if (!res.ok) return [];
     const data = await res.json();
     return (data.audit_logs as AuditLogItem[]) ?? [];
@@ -310,5 +311,3 @@ export async function fetchAuditLogs(): Promise<AuditLogItem[]> {
     return [];
   }
 }
-
-

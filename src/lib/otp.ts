@@ -1,3 +1,5 @@
+import { API_URL } from './api';
+
 async function parseJsonResponse(response: Response) {
   const text = await response.text();
   if (!text) return {};
@@ -9,7 +11,7 @@ async function parseJsonResponse(response: Response) {
 }
 
 export async function requestOtpEmail(email: string) {
-  const response = await fetch('/api/otp/request', {
+  const response = await fetch(`${API_URL}/api/otp/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
@@ -26,7 +28,7 @@ export async function requestOtpEmail(email: string) {
 }
 
 export async function verifyOtpCode(email: string, code: string) {
-  const response = await fetch('/api/otp/verify', {
+  const response = await fetch(`${API_URL}/api/otp/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, code }),
