@@ -82,7 +82,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://your-actual-vercel-domain.vercel.app",
+        "https://health-vault-smoky-psi.vercel.app",
         "http://localhost:5173",  # keep for local dev
     ],
     allow_credentials=True,
