@@ -1,110 +1,130 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/Button';
 import { TextField } from '../ui/TextField';
 import type { StaffMember } from '../../types';
+import { createStaffMember, fetchStaffMembers } from '../../lib/supabase';
 
-const INITIAL_STAFF_MEMBERS: StaffMember[] = [
-  {
-    id: '1',
-    initials: 'JS',
-    name: 'Dr. James Smith',
-    email: 'jsmith@hospital.edu',
-    role: 'Doctor',
-    status: 'Active',
-    lastActive: '2 mins ago',
-  },
-  {
-    id: '2',
-    initials: 'AL',
-    name: 'Amanda Lewis',
-    email: 'alewis@hospital.edu',
-    role: 'Nurse',
-    status: 'Active',
-    lastActive: '1 hour ago',
-  },
-  {
-    id: '3',
-    initials: 'RP',
-    name: 'Dr. Robert Patel',
-    email: 'rpatel@hospital.edu',
-    role: 'Fellow',
-    status: 'Pending',
-    lastActive: 'Never',
-  },
-];
-
-const ROLE_OPTIONS = ['Doctor', 'physician', 'Nurse', 'Fellow', 'Resident', 'Pharmasist', 'Reserchers'];
+const ROLE_OPTIONS = ['Doctor', 'Physician', 'Nurse', 'Fellow', 'Resident', 'Pharmacist', 'Researcher'];
 const DEPARTMENT_OPTIONS = ['Cardiology', 'Radiology', 'Oncology', 'Pharmacy'];
 
 function BackIcon() {
   return (
-    <svg width="6" height="9" viewBox="0 0 6 9" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M3.45 4.5L0 1.05L1.05 0L5.55 4.5L1.05 9L0 7.95L3.45 4.5Z" fill="currentColor" />
+    <svg width="6" height="9" viewBox="0 0 6 9" fill="none" aria-hidden="true">
+      <path d="M4.5 9L0 4.5L4.5 0L5.55 1.05L2.1 4.5L5.55 7.95L4.5 9Z" fill="currentColor" />
     </svg>
   );
 }
 
 function ForwardIcon() {
   return (
-    <svg width="6" height="9" viewBox="0 0 6 9" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M4.5 9L0 4.5L4.5 0L5.55 1.05L2.1 4.5L5.55 7.95L4.5 9Z" fill="currentColor" />
+    <svg width="6" height="9" viewBox="0 0 6 9" fill="none" aria-hidden="true">
+      <path d="M3.45 4.5L0 1.05L1.05 0L5.55 4.5L1.05 9L0 7.95L3.45 4.5Z" fill="currentColor" />
     </svg>
   );
 }
 
 function SendIcon() {
   return (
-    <svg width="6" height="9" viewBox="0 0 6 9" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M4.5 9L0 4.5L4.5 0L5.55 1.05L2.1 4.5L5.55 7.95L4.5 9Z" fill="currentColor" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
+function EyeIcon({ show }: { show: boolean }) {
+  return show ? (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" stroke="#667085" strokeWidth="1.5" />
+      <circle cx="12" cy="12" r="3" stroke="#667085" strokeWidth="1.5" />
+    </svg>
+  ) : (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22" stroke="#667085" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+const PAGE_SIZE = 8;
+
 export function UsersManagementScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>(INITIAL_STAFF_MEMBERS);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [isLoadingStaff, setIsLoadingStaff] = useState(true);
+  const [page, setPage] = useState(1);
+
+  // Form state
   const [fullName, setFullName] = useState('');
   const [institutionalEmail, setInstitutionalEmail] = useState('');
-  const [roleAssignment, setRoleAssignment] = useState('physician');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [roleAssignment, setRoleAssignment] = useState('Physician');
   const [departmentAssignment, setDepartmentAssignment] = useState('Cardiology');
   const [isAdmin, setIsAdmin] = useState('false');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formSuccess, setFormSuccess] = useState(false);
+
+  // Load staff from Supabase on mount
+  useEffect(() => {
+    setIsLoadingStaff(true);
+    fetchStaffMembers()
+      .then((members) => setStaffMembers(members))
+      .finally(() => setIsLoadingStaff(false));
+  }, []);
 
   const filteredStaff = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     if (!query) return staffMembers;
     return staffMembers.filter((member) =>
-      [member.name, member.email, member.role, member.department ?? '', member.status].some((value) => value.toLowerCase().includes(query)),
+      [member.name, member.email, member.role, member.department ?? '', member.status].some((v) =>
+        v.toLowerCase().includes(query),
+      ),
     );
   }, [searchQuery, staffMembers]);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const totalPages = Math.max(1, Math.ceil(filteredStaff.length / PAGE_SIZE));
+  const pagedStaff = filteredStaff.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!fullName.trim() || !institutionalEmail.trim()) return;
+    setFormError(null);
+    setFormSuccess(false);
 
-    const initials = fullName
-      .split(' ')
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() ?? '')
-      .join('');
+    if (!fullName.trim() || !institutionalEmail.trim() || !password.trim()) {
+      setFormError('Full name, email, and password are required.');
+      return;
+    }
+    if (password.length < 8) {
+      setFormError('Password must be at least 8 characters.');
+      return;
+    }
 
-    const newMember: StaffMember = {
-      id: `${Date.now()}`,
-      initials,
-      name: fullName.trim(),
-      email: institutionalEmail.trim(),
-      role: roleAssignment,
-      department: departmentAssignment,
-      status: 'Pending',
-      lastActive: 'Just invited',
-      isAdmin: isAdmin === 'true',
-    };
+    setIsSubmitting(true);
+    try {
+      const newMember = await createStaffMember({
+        fullName: fullName.trim(),
+        email: institutionalEmail.trim(),
+        password,
+        role: roleAssignment,
+        department: departmentAssignment,
+        isAdmin: isAdmin === 'true',
+      });
 
-    setStaffMembers((current) => [newMember, ...current]);
-    setFullName('');
-    setInstitutionalEmail('');
-    setRoleAssignment('physician');
-    setDepartmentAssignment('Cardiology');
-    setIsAdmin('false');
+      setStaffMembers((prev) => [newMember, ...prev]);
+      setFullName('');
+      setInstitutionalEmail('');
+      setPassword('');
+      setRoleAssignment('Physician');
+      setDepartmentAssignment('Cardiology');
+      setIsAdmin('false');
+      setFormSuccess(true);
+      setTimeout(() => setFormSuccess(false), 4000);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -116,6 +136,7 @@ export function UsersManagementScreen() {
       </div>
 
       <div className="users-grid">
+        {/* ── Staff Directory ── */}
         <section className="users-directory-card panel-card">
           <div className="users-directory-header">
             <div>
@@ -132,7 +153,7 @@ export function UsersManagementScreen() {
                   type="text"
                   placeholder="Search staff..."
                   value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
                 />
               </div>
               <button type="button" className="users-filter-button" aria-label="Filter staff">
@@ -155,52 +176,84 @@ export function UsersManagementScreen() {
                 </tr>
               </thead>
               <tbody>
-                {filteredStaff.map((member) => (
-                  <tr key={member.id}>
-                    <td>
-                      <div className="user-cell">
-                        <div className="user-avatar">{member.initials}</div>
-                        <div>
-                          <div className="user-name">{member.name}</div>
-                          <div className="user-email">{member.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{member.role}</td>
-                    <td>
-                      <span className={`status-pill status-pill--${member.status.toLowerCase()}`}>
-                        {member.status}
-                      </span>
-                    </td>
-                    <td>{member.lastActive}</td>
-                    <td>
-                      <button type="button" className="icon-button users-action-button" aria-label="Row actions">
-                        <svg width="4" height="16" viewBox="0 0 4 16" fill="none" aria-hidden="true">
-                          <circle cx="2" cy="2" r="1.5" fill="#475569" />
-                          <circle cx="2" cy="8" r="1.5" fill="#475569" />
-                          <circle cx="2" cy="14" r="1.5" fill="#475569" />
-                        </svg>
-                      </button>
+                {isLoadingStaff ? (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#667085' }}>
+                      Loading staff directory…
                     </td>
                   </tr>
-                ))}
+                ) : pagedStaff.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: 'center', padding: '2rem', color: '#667085' }}>
+                      {searchQuery ? 'No staff match your search.' : 'No staff members yet. Use the form to add one.'}
+                    </td>
+                  </tr>
+                ) : (
+                  pagedStaff.map((member) => (
+                    <tr key={member.id}>
+                      <td>
+                        <div className="user-cell">
+                          <div className="user-avatar">{member.initials}</div>
+                          <div>
+                            <div className="user-name">{member.name}</div>
+                            <div className="user-email">{member.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>{member.role}</td>
+                      <td>
+                        <span className={`status-pill status-pill--${member.status.toLowerCase()}`}>
+                          {member.status}
+                        </span>
+                      </td>
+                      <td>{member.lastActive}</td>
+                      <td>
+                        <button type="button" className="icon-button users-action-button" aria-label="Row actions">
+                          <svg width="4" height="16" viewBox="0 0 4 16" fill="none" aria-hidden="true">
+                            <circle cx="2" cy="2" r="1.5" fill="#475569" />
+                            <circle cx="2" cy="8" r="1.5" fill="#475569" />
+                            <circle cx="2" cy="14" r="1.5" fill="#475569" />
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
 
           <div className="users-table-footer">
-            <span>Showing {filteredStaff.length}-3 of 42 staff members</span>
+            <span>
+              {isLoadingStaff
+                ? 'Loading…'
+                : `Showing ${pagedStaff.length} of ${filteredStaff.length} staff member${filteredStaff.length !== 1 ? 's' : ''}`}
+            </span>
             <div className="pagination-controls">
-              <button type="button" className="pagination-button" aria-label="Previous page">
+              <button
+                type="button"
+                className="pagination-button"
+                aria-label="Previous page"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
                 <BackIcon />
               </button>
-              <button type="button" className="pagination-button" aria-label="Next page">
+              <span style={{ fontSize: '0.8rem', color: '#667085', padding: '0 4px' }}>{page} / {totalPages}</span>
+              <button
+                type="button"
+                className="pagination-button"
+                aria-label="Next page"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
                 <ForwardIcon />
               </button>
             </div>
           </div>
         </section>
 
+        {/* ── Provision Staff Form ── */}
         <aside className="users-provision-card panel-card">
           <div className="users-provision-header">
             <div className="users-provision-title-row">
@@ -216,30 +269,72 @@ export function UsersManagementScreen() {
             </div>
           </div>
 
-          <form className="users-provision-form" onSubmit={handleSubmit}>
+          <form className="users-provision-form" onSubmit={handleSubmit} noValidate>
             <TextField
               label="Full Name"
               placeholder="e.g., Dr. Alice Chen"
               value={fullName}
-              onChange={(event) => setFullName(event.target.value)}
+              onChange={(e) => setFullName(e.target.value)}
+              required
             />
 
             <TextField
               label="Institutional Email"
+              type="email"
               placeholder="achen@hospital.edu"
               value={institutionalEmail}
-              onChange={(event) => setInstitutionalEmail(event.target.value)}
+              onChange={(e) => setInstitutionalEmail(e.target.value)}
+              required
             />
+
+            {/* Password field with show/hide toggle */}
+            <div className="text-field">
+              <label htmlFor="provision-password" className="text-field-label">
+                Password
+              </label>
+              <div className="text-field-control" style={{ position: 'relative' }}>
+                <input
+                  id="provision-password"
+                  className="text-field-input"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Min. 8 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  required
+                  style={{ paddingRight: '2.5rem' }}
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword((v) => !v)}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: 0,
+                  }}
+                >
+                  <EyeIcon show={showPassword} />
+                </button>
+              </div>
+            </div>
 
             <label className="field-label">
               Department
               <select
                 className="access-select"
                 value={departmentAssignment}
-                onChange={(event) => setDepartmentAssignment(event.target.value)}
+                onChange={(e) => setDepartmentAssignment(e.target.value)}
               >
-                {DEPARTMENT_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                {DEPARTMENT_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
             </label>
@@ -249,10 +344,10 @@ export function UsersManagementScreen() {
               <select
                 className="access-select"
                 value={roleAssignment}
-                onChange={(event) => setRoleAssignment(event.target.value)}
+                onChange={(e) => setRoleAssignment(e.target.value)}
               >
-                {ROLE_OPTIONS.map((option) => (
-                  <option key={option} value={option}>{option}</option>
+                {ROLE_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
             </label>
@@ -262,14 +357,34 @@ export function UsersManagementScreen() {
               <select
                 className="access-select"
                 value={isAdmin}
-                onChange={(event) => setIsAdmin(event.target.value)}
+                onChange={(e) => setIsAdmin(e.target.value)}
               >
-                <option value="true">True</option>
-                <option value="false">False</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
               </select>
             </label>
 
-            <Button type="submit" variant="primary" size="md" icon={<SendIcon />}>Send Invitation</Button>
+            {formError && (
+              <p style={{ color: '#BA1A1A', fontSize: '0.825rem', margin: '0.25rem 0' }}>
+                ⚠ {formError}
+              </p>
+            )}
+
+            {formSuccess && (
+              <p style={{ color: '#004E32', fontSize: '0.825rem', margin: '0.25rem 0' }}>
+                ✓ User created successfully.
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              variant="primary"
+              size="md"
+              icon={<SendIcon />}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Creating…' : 'Create User'}
+            </Button>
           </form>
         </aside>
       </div>

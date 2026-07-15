@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react';
+import { clearStoredOtpEmail, getStoredOtpEmail, requestOtpEmail, verifyOtpCode } from '../../lib/otp';
 import { supabase } from '../../lib/supabase';
 
 function ShieldBadgeIcon() {
@@ -32,15 +33,18 @@ function HelpIcon() {
 
 interface MfaChallengeScreenProps {
   onVerified: () => void;
+  onCancel: () => void;
 }
 
-export function MfaChallengeScreen({ onVerified }: MfaChallengeScreenProps) {
+export function MfaChallengeScreen({ onVerified, onCancel }: MfaChallengeScreenProps) {
   const [values, setValues] = useState<string[]>(Array(6).fill(''));
   const [activeIndex, setActiveIndex] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(180);
   const [submitting, setSubmitting] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
   const [resendActive, setResendActive] = useState(false);
-  const [notice, setNotice] = useState('We sent a one-time code to your registered email address.');
+  const [notice, setNotice] = useState('A one-time code was sent to your registered email address.');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [helpOpen] = useState(false);
 
   const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
@@ -58,31 +62,14 @@ export function MfaChallengeScreen({ onVerified }: MfaChallengeScreenProps) {
   }, []);
 
   useEffect(() => {
-    const sendOtpToEmail = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const email = session?.user?.email;
+    const email = getStoredOtpEmail();
+    if (!email) {
+      setNotice('No registered email was found. Please sign in again to request a new code.');
+      return;
+    }
 
-      if (!email) {
-        setNotice('No email is available for this session yet.');
-        return;
-      }
-
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-        },
-      });
-
-      if (error) {
-        setNotice(`The OTP email could not be sent: ${error.message}`);
-        return;
-      }
-
-      setNotice(`A one-time code request was accepted for ${email}. If you still receive a magic link, the Supabase email template needs to include the OTP token placeholder.`);
-    };
-
-    sendOtpToEmail();
+    setUserEmail(email);
+    setNotice(`A one-time code was sent to ${email}. Check your inbox and enter it below.`);
   }, []);
 
   const handleChange = (index: number) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -145,40 +132,44 @@ export function MfaChallengeScreen({ onVerified }: MfaChallengeScreenProps) {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isComplete) return;
+    if (!isComplete || !userEmail) return;
     setSubmitting(true);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const email = session?.user?.email;
-
-    if (!email) {
-      setSubmitting(false);
-      window.alert('Unable to verify the code without an active account session.');
-      return;
-    }
-
-    const { error } = await supabase.auth.verifyOtp({
-      email,
-      token: code,
-      type: 'email',
-    });
-
-    setSubmitting(false);
-
-    if (!error) {
+    try {
+      await verifyOtpCode(userEmail, code);
+      await supabase.auth.updateUser({
+        data: { otp_verified: 'true' },
+      });
+      clearStoredOtpEmail();
       onVerified();
-      return;
+    } catch (error) {
+      setNotice(`Verification failed: ${error instanceof Error ? error.message : String(error)}.`);
+    } finally {
+      setSubmitting(false);
     }
-
-    setNotice(error.message);
   };
 
-  const handleResend = () => {
+  const handleResend = async () => {
+    if (!userEmail) {
+      setNotice('No email is available. Please sign in again to request a new code.');
+      return;
+    }
+
     setResendActive(true);
     setSecondsLeft(180);
     setValues(Array(6).fill(''));
     setActiveIndex(0);
-    window.setTimeout(() => setResendActive(false), 1200);
+    setSendingOtp(true);
+
+    try {
+      await requestOtpEmail(userEmail);
+      setNotice(`A new code was sent to ${userEmail}. Check your inbox and enter the updated code.`);
+    } catch (error) {
+      setNotice(`Resend failed: ${error instanceof Error ? error.message : String(error)}.`);
+    } finally {
+      setSendingOtp(false);
+      window.setTimeout(() => setResendActive(false), 1200);
+    }
   };
 
   const displayTime = useMemo(() => {
@@ -238,6 +229,10 @@ export function MfaChallengeScreen({ onVerified }: MfaChallengeScreenProps) {
           <span className="mfa-pill-icon"><ShieldCheckIcon /></span>
           End-to-End Encrypted Session
         </div>
+
+        <button type="button" className="mfa-back-link" onClick={onCancel}>
+          Back to login
+        </button>
 
         <a href="#" className="mfa-support-link">
           <span className="mfa-support-icon"><HelpIcon /></span>

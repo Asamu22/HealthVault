@@ -8,12 +8,14 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .ts,.tsx",
-    "smtp:local": "node scripts/local-smtp-server.mjs"
+    "smtp:local": "node scripts/local-smtp-server.mjs",
+    "mail:dev": "node scripts/local-mail-api.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
+    "nodemailer": "^9.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "smtp-server": "^3.19.2",

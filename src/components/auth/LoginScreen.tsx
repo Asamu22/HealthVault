@@ -110,18 +110,6 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       return;
     }
 
-    const otpResponse = await supabase.auth.signInWithOtp({
-      email: loginEmail,
-      options: {
-        shouldCreateUser: false,
-      },
-    });
-
-    if (otpResponse.error) {
-      setMessage(`Signed in, but the OTP email could not be sent: ${otpResponse.error.message}`);
-      return;
-    }
-
     const metadataRole = data.user?.user_metadata?.role;
     const inferredRole: AuthRole = metadataRole === 'admin'
       || loginEmail === import.meta.env.VITE_ADMIN_EMAIL
@@ -130,6 +118,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       ? 'admin'
       : 'staff';
 
+    setMessage(`Welcome back, ${loginEmail}. Redirecting to your dashboard now.`);
     onLogin(inferredRole);
   };
 
