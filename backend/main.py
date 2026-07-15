@@ -77,12 +77,17 @@ def issue_session_token(email: str) -> str:
 app = FastAPI()
 
 # CORS: allow the Vite dev server and common local origins
+from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173'],
+    allow_origins=[
+        "https://your-actual-vercel-domain.vercel.app",
+        "http://localhost:5173",  # keep for local dev
+    ],
     allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 router = APIRouter(prefix='/api/otp', tags=['otp'])
