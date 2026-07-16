@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import type { PatientRecordItem } from '../../types';
 import { getRecordPdfUrl } from '../../lib/supabase';
 
-// PdfSection: builds proxy URL synchronously and renders directly in an iframe
+// PdfSection: fetches the proxy URL (now async — it includes an auth token
+// query param, see lib/supabase.ts getRecordPdfUrl) and renders it in an iframe
 
 
 interface PatientRecordScreenProps {
@@ -43,11 +44,28 @@ function PdfViewer({ pdfUrl, fileName, mobile }: { pdfUrl: string; fileName: str
 }
 
 function PdfSection({ filePath, fileName, mobile }: { filePath: string; fileName: string; mobile?: boolean }) {
-  // getRecordPdfUrl is now synchronous — returns the backend proxy URL directly
-  const pdfUrl = getRecordPdfUrl(filePath);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!filePath) return;
+    getRecordPdfUrl(filePath)
+      .then((url) => { if (!cancelled) setPdfUrl(url); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load PDF.'); });
+    return () => { cancelled = true; };
+  }, [filePath]);
 
   if (!filePath) {
     return <div className="pdf-viewer-empty">No PDF available for this record.</div>;
+  }
+
+  if (error) {
+    return <div className="pdf-viewer-empty">{error}</div>;
+  }
+
+  if (!pdfUrl) {
+    return <div className="pdf-viewer-empty">Loading secure viewer…</div>;
   }
 
   return <PdfViewer pdfUrl={pdfUrl} fileName={fileName} mobile={mobile} />;

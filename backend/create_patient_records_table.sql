@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS patient_records (
     id TEXT PRIMARY KEY,
     patient_name TEXT NOT NULL,
     patient_initials TEXT NOT NULL DEFAULT '',
-    sensitivity TEXT NOT NULL DEFAULT 'Normal',
+    sensitivity TEXT NOT NULL DEFAULT 'Confidential',
     status TEXT NOT NULL DEFAULT 'Encrypted',
     encryption TEXT NOT NULL DEFAULT 'AES-GCM',
     department TEXT NOT NULL DEFAULT '',

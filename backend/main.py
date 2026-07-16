@@ -74,6 +74,176 @@ def issue_session_token(email: str) -> str:
     )
 
 
+# Canonical ABAC resource-sensitivity taxonomy — mirrors
+# src/lib/constants.ts SENSITIVITY_OPTIONS. Keep both in sync.
+CANONICAL_SENSITIVITY_LEVELS = ('Critical (PHI)', 'Confidential', 'Restricted', 'Public')
+
+
+# ─── Requester identity resolution ───────────────────────────────────────────
+#
+# The records endpoints below need to know *who* is asking, in ABAC terms
+# (their subject_role), to evaluate access policies for real. Staff
+# authenticate via Supabase Auth on the frontend; we verify the session
+# token they send us and look up their clinical role from staff_members
+# (staff_members.id matches auth.users.id).
+#
+# Two ways a caller can supply the token, since not every place this URL is
+# used can attach a custom header:
+#   - Authorization: Bearer <token>  (used by plain fetch() calls, e.g. upload)
+#   - ?token=<token> query param      (used where the URL is set directly as
+#     an <iframe src> / <a href>, e.g. the PDF viewer/download links, which
+#     can't attach headers)
+# The query-param path means a session token can end up in browser history
+# and server access logs for those specific requests. That's a real
+# tradeoff, made here to keep the existing iframe-based PDF viewer working
+# without a larger rework of how it fetches PDFs — worth revisiting if this
+# app moves past prototype stage.
+def _resolve_requester(request: Request) -> dict:
+    """Verify the caller's session token and return their staff_members row.
+    Raises 401/403 (fails closed) if there's no valid, staff-linked session."""
+    token = None
+    auth_header = request.headers.get('authorization', '')
+    if auth_header.lower().startswith('bearer '):
+        token = auth_header[7:].strip()
+    if not token:
+        token = request.query_params.get('token')
+
+    if not token:
+        raise HTTPException(status_code=401, detail='Missing authentication token.')
+
+    try:
+        user_response = sb.auth.get_user(token)
+        user = user_response.user if user_response else None
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail='Invalid or expired session.') from exc
+
+    if not user:
+        raise HTTPException(status_code=401, detail='Invalid or expired session.')
+
+    try:
+        result = sb.table('staff_members').select('*').eq('id', str(user.id)).limit(1).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to resolve staff profile: {exc}') from exc
+
+    rows = result.data or []
+    if not rows:
+        raise HTTPException(status_code=403, detail='No staff profile found for this account.')
+
+    return rows[0]
+
+
+# ─── Shared ABAC evaluation engine ───────────────────────────────────────────
+#
+# Used both by real enforcement (records endpoints, below) and by the manual
+# /api/access/evaluate endpoint (the "Test Access Request" simulator panel),
+# so the two never drift apart.
+
+def _load_live_policies() -> list[dict]:
+    try:
+        result = sb.table('access_policies').select('*').eq('is_dry_run', False).execute()
+        return result.data or []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to load policies: {exc}') from exc
+
+
+def _policy_matches(policy: dict, *, subject_role: str, action: str, resource_sensitivity: str,
+                     department: str, environment: str) -> bool:
+    """Check if the given request attributes satisfy a policy's conditions."""
+    if policy['subject_role'].lower() != subject_role.lower():
+        return False
+    if policy['action'].lower() != action.lower():
+        return False
+    if policy['resource_sensitivity'].lower() != resource_sensitivity.lower():
+        return False
+    if policy['department'].lower() not in ('any', department.lower()):
+        return False
+    if policy['environment'].lower() not in ('any', environment.lower()):
+        return False
+    for cond in (policy.get('extra_conditions') or []):
+        field = cond.get('field', '').lower()
+        val = cond.get('value', '').lower()
+        if field == 'subject role' and subject_role.lower() != val:
+            return False
+        if field == 'action' and action.lower() != val:
+            return False
+        if field == 'resource sensitivity' and resource_sensitivity.lower() != val:
+            return False
+        if field == 'environment' and environment.lower() != val:
+            return False
+    return True
+
+
+def _evaluate_policy_decision(*, subject_role: str, action: str, resource_sensitivity: str,
+                               department: str, environment: str) -> dict:
+    """
+    Deny-overrides ABAC evaluation. Any matching deny wins; otherwise the
+    first matching allow wins. Default effect when nothing matches: deny.
+    """
+    policies = _load_live_policies()
+    matched_allow = None
+    matched_deny = None
+
+    for policy in policies:
+        if _policy_matches(policy, subject_role=subject_role, action=action,
+                            resource_sensitivity=resource_sensitivity,
+                            department=department, environment=environment):
+            if policy['effect'] == 'deny' and matched_deny is None:
+                matched_deny = policy
+            elif policy['effect'] == 'allow' and matched_allow is None:
+                matched_allow = policy
+
+    if matched_deny:
+        return {
+            'decision': 'deny',
+            'matched_policy': matched_deny['name'],
+            'reason': f"Explicitly denied by policy: '{matched_deny['name']}'",
+        }
+    if matched_allow:
+        return {
+            'decision': 'allow',
+            'matched_policy': matched_allow['name'],
+            'reason': f"Permitted by policy: '{matched_allow['name']}'",
+        }
+    return {
+        'decision': 'deny',
+        'matched_policy': None,
+        'reason': 'No policy permits this request (default deny).',
+    }
+
+
+def _enforce_access(requester: dict, *, action: str, resource_sensitivity: str, department: str) -> None:
+    """Evaluate access for a real records request and raise 403 if denied.
+    Environment is not modeled from real signals yet (no shift/network/time
+    context available at these endpoints), so it's always evaluated as
+    'Any' — meaning policies that only apply in a specific environment
+    (e.g. 'Outside Business Hours') won't be triggered by these checks."""
+    subject_role = requester.get('role') or ''
+    decision = _evaluate_policy_decision(
+        subject_role=subject_role,
+        action=action,
+        resource_sensitivity=resource_sensitivity,
+        department=department,
+        environment='Any',
+    )
+    audit_subject = requester.get('email') or requester.get('id') or 'unknown'
+    if decision['decision'] != 'allow':
+        _audit('access_denied', audit_subject, {
+            'action': action,
+            'resource_sensitivity': resource_sensitivity,
+            'department': department,
+            'subject_role': subject_role,
+            'reason': decision.get('reason'),
+        })
+        raise HTTPException(status_code=403, detail=decision.get('reason', 'Access denied by policy.'))
+    _audit('access_allowed', audit_subject, {
+        'action': action,
+        'resource_sensitivity': resource_sensitivity,
+        'department': department,
+        'subject_role': subject_role,
+        'policy': decision.get('matched_policy'),
+    })
+
+
 app = FastAPI()
 
 # CORS: allow the Vite dev server and common local origins
@@ -215,7 +385,16 @@ async def verify_otp(body: OtpVerifyBody):
 
 
 @records_router.get('/list')
-async def list_records():
+async def list_records(request: Request):
+    requester = _resolve_requester(request)
+    # Endpoint-level gate: this returns the whole list, so it can't be
+    # evaluated per-record. Deliberately evaluated at the most restrictive
+    # tier — if a role/action isn't permitted to read Critical (PHI), it
+    # can't list records at all. Department is 'Any' here since there's no
+    # single record to scope to; department-scoped policies won't gate this
+    # endpoint as a result — only policies scoped to 'Any' department do.
+    _enforce_access(requester, action='Read (View Only)',
+                     resource_sensitivity='Critical (PHI)', department='Any')
     try:
         result = (
             sb.table('patient_records')
@@ -228,9 +407,26 @@ async def list_records():
         raise HTTPException(status_code=500, detail=f'Unable to fetch records: {exc}') from exc
 
 
+def _lookup_record_by_file_path(file_path: str) -> dict:
+    """Fetch a patient_records row by file_path. Fails closed (404) if not found,
+    since we can't evaluate sensitivity-based access for a record we can't find."""
+    try:
+        result = sb.table('patient_records').select('*').eq('file_path', file_path).limit(1).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to look up record: {exc}') from exc
+    rows = result.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail='No record found for this file path.')
+    return rows[0]
+
+
 @records_router.get('/pdf-url')
-async def get_pdf_url(file_path: str):
+async def get_pdf_url(file_path: str, request: Request):
     """Generate a short-lived signed URL for a stored PDF using the service role key."""
+    requester = _resolve_requester(request)
+    record = _lookup_record_by_file_path(file_path)
+    _enforce_access(requester, action='Read (View Only)',
+                     resource_sensitivity=record['sensitivity'], department=record['department'])
     try:
         result = sb.storage.from_(STORAGE_BUCKET).create_signed_url(file_path, 3600)
         if isinstance(result, dict):
@@ -249,8 +445,13 @@ async def get_pdf_url(file_path: str):
 
 
 @records_router.get('/pdf-proxy')
-async def proxy_pdf(file_path: str):
+async def proxy_pdf(file_path: str, request: Request):
     """Stream PDF bytes from Supabase storage with inline Content-Disposition so browsers display it."""
+    requester = _resolve_requester(request)
+    record = _lookup_record_by_file_path(file_path)
+    _enforce_access(requester, action='Read (View Only)',
+                     resource_sensitivity=record['sensitivity'], department=record['department'])
+
     # 1. Get a short-lived signed URL
     try:
         result = sb.storage.from_(STORAGE_BUCKET).create_signed_url(file_path, 300)
@@ -288,6 +489,7 @@ async def proxy_pdf(file_path: str):
 
 @records_router.post('/upload')
 async def upload_record_pdf(
+    request: Request,
     file: Annotated[UploadFile, File(...)],
     patient_name: Annotated[str, Form()],
     patient_initials: Annotated[str, Form()],
@@ -296,6 +498,16 @@ async def upload_record_pdf(
     author: Annotated[str, Form()],
     record_id: Annotated[str, Form()],
 ):
+    if sensitivity not in CANONICAL_SENSITIVITY_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sensitivity '{sensitivity}'. Must be one of: {', '.join(CANONICAL_SENSITIVITY_LEVELS)}.",
+        )
+
+    requester = _resolve_requester(request)
+    _enforce_access(requester, action='Write (Modify)',
+                     resource_sensitivity=sensitivity, department=department)
+
     if not file.filename:
         raise HTTPException(status_code=400, detail='A PDF file is required.')
 
@@ -529,93 +741,31 @@ async def update_policy(policy_id: str, body: PolicyBody):
 @access_router.post('/evaluate')
 async def evaluate_access(body: EvaluateBody):
     """
-    ABAC evaluation engine.
-    Loads all non-dry-run 'allow' and 'deny' policies and evaluates them in order.
+    ABAC evaluation engine (manual "Test Access Request" simulator).
     Deny-overrides: any matching deny wins. Otherwise first matching allow wins.
     Default effect when no policy matches: deny.
+    Shares its matching logic with real enforcement — see _evaluate_policy_decision.
     """
-    try:
-        result = (
-            sb.table('access_policies')
-            .select('*')
-            .eq('is_dry_run', False)
-            .execute()
-        )
-        policies = result.data or []
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'Unable to load policies: {exc}') from exc
+    decision = _evaluate_policy_decision(
+        subject_role=body.subject_role,
+        action=body.action,
+        resource_sensitivity=body.resource_sensitivity,
+        department=body.department,
+        environment=body.environment,
+    )
 
-    def policy_matches(policy: dict) -> bool:
-        """Check if the request attributes satisfy a policy's conditions."""
-        if policy['subject_role'].lower() != body.subject_role.lower():
-            return False
-        if policy['action'].lower() != body.action.lower():
-            return False
-        if policy['resource_sensitivity'].lower() != body.resource_sensitivity.lower():
-            return False
-        if policy['department'].lower() not in ('any', body.department.lower()):
-            if policy['department'].lower() != body.department.lower():
-                return False
-        if policy['environment'].lower() not in ('any', body.environment.lower()):
-            if policy['environment'].lower() != body.environment.lower():
-                return False
-        # Check extra conditions (all must match)
-        for cond in (policy.get('extra_conditions') or []):
-            field = cond.get('field', '').lower()
-            val = cond.get('value', '').lower()
-            if field == 'subject role' and body.subject_role.lower() != val:
-                return False
-            if field == 'action' and body.action.lower() != val:
-                return False
-            if field == 'resource sensitivity' and body.resource_sensitivity.lower() != val:
-                return False
-            if field == 'environment' and body.environment.lower() != val:
-                return False
-        return True
-
-    matched_allow = None
-    matched_deny = None
-
-    for policy in policies:
-        if policy_matches(policy):
-            if policy['effect'] == 'deny' and matched_deny is None:
-                matched_deny = policy
-            elif policy['effect'] == 'allow' and matched_allow is None:
-                matched_allow = policy
-
-    # Deny overrides allow
-    if matched_deny:
+    if decision['decision'] == 'deny':
         _audit('access_denied', body.subject_role, {
             'action': body.action,
-            'policy': matched_deny['name'],
+            'policy': decision.get('matched_policy'),
         })
-        return {
-            'decision': 'deny',
-            'matched_policy': matched_deny['name'],
-            'reason': f"Explicitly denied by policy: '{matched_deny['name']}'",
-        }
-
-    if matched_allow:
+    else:
         _audit('access_allowed', body.subject_role, {
             'action': body.action,
-            'policy': matched_allow['name'],
+            'policy': decision.get('matched_policy'),
         })
-        return {
-            'decision': 'allow',
-            'matched_policy': matched_allow['name'],
-            'reason': f"Permitted by policy: '{matched_allow['name']}'",
-        }
 
-    # Default deny
-    _audit('access_denied', body.subject_role, {
-        'action': body.action,
-        'reason': 'no_matching_policy',
-    })
-    return {
-        'decision': 'deny',
-        'matched_policy': None,
-        'reason': 'No policy permits this request (default deny).',
-    }
+    return decision
 
 
 # ─── Audit Logs ──────────────────────────────────────────────────────────────

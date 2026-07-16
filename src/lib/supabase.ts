@@ -50,9 +50,19 @@ function mapRecord(row: SupabasePatientRecord): PatientRecordItem {
   };
 }
 
+// The backend verifies this token and looks up the caller's staff role to
+// evaluate ABAC policies for real — see backend/main.py _resolve_requester.
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
+
 export async function fetchPatientRecords(): Promise<PatientRecordItem[]> {
   try {
-    const response = await fetch(`${API_URL}/api/records/list`);
+    const token = await getAccessToken();
+    const response = await fetch(`${API_URL}/api/records/list`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
     if (!response.ok) {
       console.warn('Failed to fetch patient records from backend:', response.status);
       return [];
@@ -108,8 +118,10 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
   formData.append('author', record.author);
   formData.append('record_id', record.id);
 
+  const token = await getAccessToken();
   const response = await fetch(`${API_URL}/api/records/upload`, {
     method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: formData,
   });
 
@@ -123,9 +135,14 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
   return mapRecord(payload.record as SupabasePatientRecord);
 }
 
-export function getRecordPdfUrl(filePath: string): string {
-  // Backend proxy serves the PDF with Content-Disposition: inline
-  return `${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}`;
+export async function getRecordPdfUrl(filePath: string): Promise<string> {
+  // Backend proxy serves the PDF with Content-Disposition: inline.
+  // The token is passed as a query param (not a header) because this URL is
+  // used directly as an <iframe src>/<a href>, which can't attach headers.
+  // See backend/main.py _resolve_requester for the tradeoffs of that.
+  const token = await getAccessToken();
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+  return `${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}${tokenParam}`;
 }
 
 // ─── Staff Members ───────────────────────────────────────────────────────────

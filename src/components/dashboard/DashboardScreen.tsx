@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { SideNavBar } from '../layout/SideNavBar';
 import type { PatientRecordItem } from '../../types';
 import { uploadPatientPdf } from '../../lib/supabase';
+import { SENSITIVITY_OPTIONS, DEFAULT_INGESTION_SENSITIVITY } from '../../lib/constants';
 
 interface DashboardScreenProps {
   records: PatientRecordItem[];
@@ -56,12 +57,14 @@ function MoreActionsIcon() {
 
 function StatusBadge({ status }: { status: string }) {
   const colors: { [key: string]: { bg: string; text: string } } = {
+    'Critical (PHI)': { bg: 'rgba(186, 26, 26, 0.1)', text: '#BA1A1A' },
+    Confidential: { bg: '#DFE8FF', text: '#091C35' },
     Restricted: { bg: 'rgba(186, 26, 26, 0.1)', text: '#BA1A1A' },
-    Normal: { bg: '#DFE8FF', text: '#091C35' },
+    Public: { bg: '#E3F2E1', text: '#1E4620' },
     'Processing': { bg: 'rgba(186, 26, 26, 0.1)', text: '#BA1A1A' },
   };
-  
-  const color = colors[status] || colors.Normal;
+
+  const color = colors[status] || colors.Confidential;
   
   return (
     <span className="status-badge" style={{ backgroundColor: color.bg, color: color.text }}>
@@ -99,7 +102,7 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
   const [uploadProgress, setUploadProgress] = useState(0);
   const [patientName, setPatientName] = useState('');
   const [department, setDepartment] = useState('Cardiology');
-  const [sensitivity, setSensitivity] = useState('Normal');
+  const [sensitivity, setSensitivity] = useState<string>(DEFAULT_INGESTION_SENSITIVITY);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -205,7 +208,7 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
       onRecordAdd(savedRecord);
       setPatientName('');
       setDepartment('Cardiology');
-      setSensitivity('Normal');
+      setSensitivity(DEFAULT_INGESTION_SENSITIVITY);
       setSelectedFile(null);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : String(error));
@@ -331,6 +334,9 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
                   </select>
                 </label>
 
+                {/* SENSITIVITY_OPTIONS is shared with PoliciesScreen/AccessControlScreen
+                    (src/lib/constants.ts) — must stay in sync so records can only be
+                    tagged with sensitivity levels ABAC policies actually match against. */}
                 <label className="ingest-label">
                   Sensitivity Level
                   <select
@@ -338,9 +344,9 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
                     value={sensitivity}
                     onChange={(e) => setSensitivity(e.target.value)}
                   >
-                    <option>Normal</option>
-                    <option>Restricted</option>
-                    <option>Highly Restricted</option>
+                    {SENSITIVITY_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
                   </select>
                 </label>
 
@@ -493,6 +499,9 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
                   </select>
                 </label>
 
+                {/* SENSITIVITY_OPTIONS is shared with PoliciesScreen/AccessControlScreen
+                    (src/lib/constants.ts) — must stay in sync so records can only be
+                    tagged with sensitivity levels ABAC policies actually match against. */}
                 <label className="ingest-label">
                   Sensitivity Level
                   <select
@@ -500,9 +509,9 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
                     value={sensitivity}
                     onChange={(e) => setSensitivity(e.target.value)}
                   >
-                    <option>Normal</option>
-                    <option>Restricted</option>
-                    <option>Highly Restricted</option>
+                    {SENSITIVITY_OPTIONS.map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
                   </select>
                 </label>
 

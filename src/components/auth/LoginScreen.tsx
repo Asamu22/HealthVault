@@ -72,8 +72,8 @@ interface LoginScreenState {
 
 export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [values, setValues] = useState<LoginScreenState>({
-    institutionEmail: import.meta.env.VITE_ADMIN_EMAIL ?? 'calebasamu47@gmail.com',
-    clinicianId: import.meta.env.VITE_ADMIN_CLINICIAN_ID ?? 'Admin 42AD',
+    institutionEmail: '',
+    clinicianId: '',
     password: '',
   });
   const [showPasscode, setShowPasscode] = useState(false);
@@ -96,7 +96,13 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       return;
     }
 
-    const loginEmail = values.institutionEmail.trim() || import.meta.env.VITE_ADMIN_EMAIL || 'calebasamu47@gmail.com';
+    const loginEmail = values.institutionEmail.trim();
+
+    if (!loginEmail) {
+      setMessage('Please enter your institution email.');
+      setSubmitting(false);
+      return;
+    }
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: loginEmail,
@@ -110,13 +116,12 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       return;
     }
 
-    const metadataRole = data.user?.user_metadata?.role;
-    const inferredRole: AuthRole = metadataRole === 'admin'
-      || loginEmail === import.meta.env.VITE_ADMIN_EMAIL
-      || values.clinicianId === import.meta.env.VITE_ADMIN_CLINICIAN_ID
-      || values.clinicianId.includes('Admin')
-      ? 'admin'
-      : 'staff';
+    // Role must come only from the server-verified session metadata.
+    // Never infer it from client-typed text (email string match, clinician
+    // ID content, etc.) -- that was letting any staff login whose Clinician
+    // ID field still held the pre-filled admin default get treated as admin
+    // until a refresh corrected it against the real session.
+    const inferredRole: AuthRole = data.user?.user_metadata?.role === 'admin' ? 'admin' : 'staff';
 
     setMessage(`Welcome back, ${loginEmail}. Redirecting to your dashboard now.`);
     onLogin(inferredRole);
