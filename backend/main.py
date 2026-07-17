@@ -132,6 +132,27 @@ def _resolve_requester(request: Request) -> dict:
     return rows[0]
 
 
+def _require_auth_only(request: Request) -> None:
+    """Verify the caller has a valid Supabase session, but do NOT require a
+    staff_members row. Used for endpoints where any authenticated user (including
+    the hardcoded admin account that lives only in .env) should have access."""
+    token = None
+    auth_header = request.headers.get('authorization', '')
+    if auth_header.lower().startswith('bearer '):
+        token = auth_header[7:].strip()
+    if not token:
+        token = request.query_params.get('token')
+    if not token:
+        raise HTTPException(status_code=401, detail='Missing authentication token.')
+    try:
+        user_response = sb.auth.get_user(token)
+        user = user_response.user if user_response else None
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail='Invalid or expired session.') from exc
+    if not user:
+        raise HTTPException(status_code=401, detail='Invalid or expired session.')
+
+
 # ─── Shared ABAC evaluation engine ───────────────────────────────────────────
 #
 # Used both by real enforcement (records endpoints, below) and by the manual
@@ -149,12 +170,14 @@ def _load_live_policies() -> list[dict]:
 def _policy_matches(policy: dict, *, subject_role: str, action: str, resource_sensitivity: str,
                      department: str, environment: str) -> bool:
     """Check if the given request attributes satisfy a policy's conditions."""
-    if policy['subject_role'].lower() != subject_role.lower():
-        return False
-    if policy['action'].lower() != action.lower():
-        return False
-    if policy['resource_sensitivity'].lower() != resource_sensitivity.lower():
-        return False
+    checks = [
+        ('subject_role', policy['subject_role'].lower(), subject_role.lower()),
+        ('action',       policy['action'].lower(),       action.lower()),
+        ('sensitivity',  policy['resource_sensitivity'].lower(), resource_sensitivity.lower()),
+    ]
+    for field, pval, rval in checks:
+        if pval != rval:
+            return False
     if policy['department'].lower() not in ('any', department.lower()):
         return False
     if policy['environment'].lower() not in ('any', environment.lower()):
@@ -213,10 +236,18 @@ def _evaluate_policy_decision(*, subject_role: str, action: str, resource_sensit
 
 def _enforce_access(requester: dict, *, action: str, resource_sensitivity: str, department: str) -> None:
     """Evaluate access for a real records request and raise 403 if denied.
-    Environment is not modeled from real signals yet (no shift/network/time
-    context available at these endpoints), so it's always evaluated as
-    'Any' — meaning policies that only apply in a specific environment
-    (e.g. 'Outside Business Hours') won't be triggered by these checks."""
+    Admin accounts bypass all policy evaluation — they must never be locked out.
+    Environment is fixed to 'Any' since shift/network context is not modeled yet."""
+    audit_subject = requester.get('email') or requester.get('id') or 'unknown'
+
+    if requester.get('is_admin'):
+        _audit('admin_access_bypass', audit_subject, {
+            'action': action,
+            'resource_sensitivity': resource_sensitivity,
+            'department': department,
+        })
+        return
+
     subject_role = requester.get('role') or ''
     decision = _evaluate_policy_decision(
         subject_role=subject_role,
@@ -225,7 +256,6 @@ def _enforce_access(requester: dict, *, action: str, resource_sensitivity: str, 
         department=department,
         environment='Any',
     )
-    audit_subject = requester.get('email') or requester.get('id') or 'unknown'
     if decision['decision'] != 'allow':
         _audit('access_denied', audit_subject, {
             'action': action,
@@ -386,15 +416,12 @@ async def verify_otp(body: OtpVerifyBody):
 
 @records_router.get('/list')
 async def list_records(request: Request):
-    requester = _resolve_requester(request)
-    # Endpoint-level gate: this returns the whole list, so it can't be
-    # evaluated per-record. Deliberately evaluated at the most restrictive
-    # tier — if a role/action isn't permitted to read Critical (PHI), it
-    # can't list records at all. Department is 'Any' here since there's no
-    # single record to scope to; department-scoped policies won't gate this
-    # endpoint as a result — only policies scoped to 'Any' department do.
-    _enforce_access(requester, action='Read (View Only)',
-                     resource_sensitivity='Critical (PHI)', department='Any')
+    # Only a valid Supabase session is required — no staff_members row needed.
+    # This means the hardcoded admin (.env only, not in staff_members) and any
+    # authenticated staff can always browse the records table.
+    # Per-record access control (ABAC) is enforced when a record is actually
+    # opened via pdf-proxy, which checks the real sensitivity/department.
+    _require_auth_only(request)
     try:
         result = (
             sb.table('patient_records')

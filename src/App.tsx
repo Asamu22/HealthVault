@@ -154,7 +154,7 @@ function App() {
     return (
       <>
         {selectedScreen === 'dashboard' && <DashboardScreen records={records} onRecordAdd={handleAddRecord} onRecordClick={setSelectedRecordId} onViewFullLog={() => setSelectedScreen('records')} />}
-        {selectedScreen === 'records' && <PatientRecordsScreen records={records} onRecordClick={(id) => setSelectedRecordId(id)} />}
+        {selectedScreen === 'records' && <PatientRecordsScreen records={records} onRecordClick={(id: string) => setSelectedRecordId(id)} />}
         {selectedScreen === 'users' && isAdmin && <UsersManagementScreen />}
         {selectedScreen === 'audit' && isAdmin && <AuditScreen onRowClick={(recordId) => setSelectedRecordId(recordId)} />}
         {selectedScreen === 'access' && isAdmin && <AccessControlScreen />}

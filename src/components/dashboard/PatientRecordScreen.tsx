@@ -1,35 +1,43 @@
 import { useEffect, useState } from 'react';
 import type { PatientRecordItem } from '../../types';
-import { getRecordPdfUrl } from '../../lib/supabase';
-
-// PdfSection: fetches the proxy URL (now async — it includes an auth token
-// query param, see lib/supabase.ts getRecordPdfUrl) and renders it in an iframe
-
+import { fetchRecordPdfBlobUrl } from '../../lib/supabase';
 
 interface PatientRecordScreenProps {
   record: PatientRecordItem;
   onBack: () => void;
 }
 
+// ─── Access Denied Dialog ─────────────────────────────────────────────────────
+function AccessDeniedDialog({ reason, onBack }: { reason: string; onBack: () => void }) {
+  return (
+    <div className="access-denied-overlay">
+      <div className="access-denied-dialog">
+        <div className="access-denied-icon">🔒</div>
+        <h2 className="access-denied-title">Access Denied</h2>
+        <p className="access-denied-reason">{reason}</p>
+        <p className="access-denied-hint">
+          Your current role and context do not satisfy the required access policy for this record.
+          Contact your administrator to request access.
+        </p>
+        <button className="access-denied-back-btn" type="button" onClick={onBack}>
+          ← Back to Records
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── PDF Viewer ───────────────────────────────────────────────────────────────
 function PdfViewer({ pdfUrl, fileName, mobile }: { pdfUrl: string; fileName: string; mobile?: boolean }) {
   return (
     <div className="pdf-viewer-wrapper">
       <div className="pdf-viewer-toolbar">
         <span className="pdf-viewer-filename">📄 {fileName}</span>
         <div className="pdf-viewer-actions">
-          <a
-            className="pdf-viewer-btn pdf-viewer-btn--download"
-            href={pdfUrl}
-            download={fileName}
-          >
+          <a className="pdf-viewer-btn pdf-viewer-btn--download" href={pdfUrl} download={fileName}>
             ↓ Download
           </a>
-          <a
-            className="pdf-viewer-btn pdf-viewer-btn--open"
-            href={pdfUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a className="pdf-viewer-btn pdf-viewer-btn--open" href={pdfUrl} target="_blank" rel="noreferrer">
             ↗ Open
           </a>
         </div>
@@ -43,37 +51,14 @@ function PdfViewer({ pdfUrl, fileName, mobile }: { pdfUrl: string; fileName: str
   );
 }
 
-function PdfSection({ filePath, fileName, mobile }: { filePath: string; fileName: string; mobile?: boolean }) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!filePath) return;
-    getRecordPdfUrl(filePath)
-      .then((url) => { if (!cancelled) setPdfUrl(url); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'Unable to load PDF.'); });
-    return () => { cancelled = true; };
-  }, [filePath]);
-
-  if (!filePath) {
-    return <div className="pdf-viewer-empty">No PDF available for this record.</div>;
-  }
-
-  if (error) {
-    return <div className="pdf-viewer-empty">{error}</div>;
-  }
-
-  if (!pdfUrl) {
-    return <div className="pdf-viewer-empty">Loading secure viewer…</div>;
-  }
-
-  return <PdfViewer pdfUrl={pdfUrl} fileName={fileName} mobile={mobile} />;
-}
-
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 export function PatientRecordScreen({ record, onBack }: PatientRecordScreenProps) {
-  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [accessState, setAccessState] = useState<'loading' | 'denied' | 'granted'>('loading');
+  const [deniedReason, setDeniedReason] = useState('');
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
+  // Responsive detection
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth <= 680);
     check();
@@ -81,6 +66,57 @@ export function PatientRecordScreen({ record, onBack }: PatientRecordScreenProps
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  // Access check: fetch PDF as a blob. A 403 → denied dialog; success → render.
+  useEffect(() => {
+    let cancelled = false;
+    if (!record.filePath) {
+      setAccessState('denied');
+      setDeniedReason('No file is associated with this record.');
+      return;
+    }
+
+    setAccessState('loading');
+    setBlobUrl(null);
+
+    fetchRecordPdfBlobUrl(record.filePath)
+      .then((url) => {
+        if (!cancelled) {
+          setBlobUrl(url);
+          setAccessState('granted');
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setDeniedReason(
+            err instanceof Error ? err.message : 'No policy permits this request (default deny).',
+          );
+          setAccessState('denied');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [record.filePath]);
+
+  // ── Loading state ────────────────────────────────────────────────────────────
+  if (accessState === 'loading') {
+    return (
+      <div className="record-detail-page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center', color: '#737685' }}>
+          <div className="pdf-spinner" style={{ margin: '0 auto 16px' }} />
+          <p>Verifying access policy…</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Denied state — full-screen dialog, no record content exposed ─────────────
+  if (accessState === 'denied') {
+    return <AccessDeniedDialog reason={deniedReason} onBack={onBack} />;
+  }
+
+  // ── Granted state ─────────────────────────────────────────────────────────────
   if (isMobile) {
     return (
       <div className="record-detail-page mobile">
@@ -126,7 +162,7 @@ export function PatientRecordScreen({ record, onBack }: PatientRecordScreenProps
               <div className="report-title">Secure PDF Viewer</div>
             </div>
             <div className="report-body">
-              <PdfSection filePath={record.filePath} fileName={record.fileName} mobile />
+              {blobUrl && <PdfViewer pdfUrl={blobUrl} fileName={record.fileName} mobile />}
             </div>
           </section>
         </main>
@@ -219,6 +255,7 @@ export function PatientRecordScreen({ record, onBack }: PatientRecordScreenProps
         </aside>
 
         <main className="record-detail-content">
+          {/* Access granted banner — only shown when access is confirmed */}
           <section className="detail-banner">
             <div className="banner-icon">✔</div>
             <div className="banner-copy">
@@ -238,7 +275,7 @@ export function PatientRecordScreen({ record, onBack }: PatientRecordScreenProps
 
             <div className="canvas-section">
               <h4>Secure PDF Viewer</h4>
-              <PdfSection filePath={record.filePath} fileName={record.fileName} />
+              {blobUrl && <PdfViewer pdfUrl={blobUrl} fileName={record.fileName} />}
             </div>
           </section>
         </main>

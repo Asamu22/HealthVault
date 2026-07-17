@@ -135,14 +135,22 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
   return mapRecord(payload.record as SupabasePatientRecord);
 }
 
-export async function getRecordPdfUrl(filePath: string): Promise<string> {
-  // Backend proxy serves the PDF with Content-Disposition: inline.
-  // The token is passed as a query param (not a header) because this URL is
-  // used directly as an <iframe src>/<a href>, which can't attach headers.
-  // See backend/main.py _resolve_requester for the tradeoffs of that.
+export async function fetchRecordPdfBlobUrl(filePath: string): Promise<string> {
+  // Authenticated fetch (header, not query token) so a 403 from ABAC
+  // enforcement is a real, catchable rejection -- not just JSON rendered
+  // inside an iframe with no way for the surrounding UI to react to it.
   const token = await getAccessToken();
-  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-  return `${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}${tokenParam}`;
+  const response = await fetch(`${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.detail || `Unable to load PDF (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // ─── Staff Members ───────────────────────────────────────────────────────────
