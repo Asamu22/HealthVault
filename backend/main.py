@@ -249,6 +249,20 @@ def _enforce_access(requester: dict, *, action: str, resource_sensitivity: str, 
         return
 
     subject_role = requester.get('role') or ''
+    policies = _load_live_policies()
+
+    print(f'\n[ABAC] -- ACCESS CHECK ---------------------------')
+    print(f'[ABAC]  email          : {audit_subject}')
+    print(f'[ABAC]  subject_role   : "{subject_role}"')
+    print(f'[ABAC]  action         : "{action}"')
+    print(f'[ABAC]  sensitivity    : "{resource_sensitivity}"')
+    print(f'[ABAC]  department     : "{department}"')
+    print(f'[ABAC]  policies loaded: {len(policies)}')
+    for p in policies:
+        print(f'[ABAC]    [{p["effect"].upper()}] name="{p["name"]}" '
+              f'role="{p["subject_role"]}" action="{p["action"]}" '
+              f'sensitivity="{p["resource_sensitivity"]}" dept="{p["department"]}"')
+
     decision = _evaluate_policy_decision(
         subject_role=subject_role,
         action=action,
@@ -256,6 +270,9 @@ def _enforce_access(requester: dict, *, action: str, resource_sensitivity: str, 
         department=department,
         environment='Any',
     )
+    print(f'[ABAC]  DECISION       : {decision["decision"].upper()} - {decision.get("reason")}')
+    print(f'[ABAC] ------------------------------------------\n')
+
     if decision['decision'] != 'allow':
         _audit('access_denied', audit_subject, {
             'action': action,
@@ -662,6 +679,34 @@ async def list_staff():
         return {'staff_members': result.data or []}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'Unable to fetch staff: {exc}') from exc
+
+
+class UpdateUserAdminBody(BaseModel):
+    isAdmin: bool
+
+@users_router.put('/{user_id}/admin')
+async def update_user_admin(user_id: str, body: UpdateUserAdminBody):
+    try:
+        sb.table('staff_members').update({'is_admin': body.isAdmin}).eq('id', user_id).execute()
+        _audit('user_admin_updated', 'system', {'user_id': user_id, 'is_admin': body.isAdmin})
+        return {'status': 'success'}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to update user admin status: {exc}') from exc
+
+
+@users_router.delete('/{user_id}')
+async def delete_user(user_id: str):
+    try:
+        sb.auth.admin.delete_user(user_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to delete auth user: {exc}') from exc
+
+    try:
+        sb.table('staff_members').delete().eq('id', user_id).execute()
+        _audit('user_deleted', 'system', {'user_id': user_id})
+        return {'status': 'success'}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to delete staff profile: {exc}') from exc
 
 
 # ─── ABAC Access Control ─────────────────────────────────────────────────────
