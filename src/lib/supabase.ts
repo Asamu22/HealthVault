@@ -225,6 +225,30 @@ export async function createStaffMember(payload: CreateStaffPayload): Promise<St
   return mapStaff(data.staff_member as SupabaseStaffMember);
 }
 
+export async function updateUserAdmin(userId: string, isAdmin: boolean): Promise<void> {
+  const response = await fetch(`${API_URL}/api/users/${userId}/admin`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isAdmin }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.detail || 'Failed to update user admin status.');
+  }
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/users/${userId}`, {
+    method: 'DELETE',
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.detail || 'Failed to delete user.');
+  }
+}
+
 // ─── ABAC Access Policies ─────────────────────────────────────────────────────
 
 export interface PolicyCondition {

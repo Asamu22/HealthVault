@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '../ui/Button';
 import { TextField } from '../ui/TextField';
 import type { StaffMember } from '../../types';
-import { createStaffMember, fetchStaffMembers } from '../../lib/supabase';
+import { createStaffMember, fetchStaffMembers, updateUserAdmin, deleteUser } from '../../lib/supabase';
 
 const ROLE_OPTIONS = ['Doctor', 'Physician', 'Nurse', 'Fellow', 'Resident', 'Pharmacist', 'Researcher'];
 const DEPARTMENT_OPTIONS = ['Cardiology', 'Radiology', 'Oncology', 'Pharmacy'];
@@ -52,6 +52,7 @@ export function UsersManagementScreen() {
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [isLoadingStaff, setIsLoadingStaff] = useState(true);
   const [page, setPage] = useState(1);
+  const [activeDropdownId, setActiveDropdownId] = useState<string | null>(null);
 
   // Form state
   const [fullName, setFullName] = useState('');
@@ -124,6 +125,27 @@ export function UsersManagementScreen() {
       setFormError(err instanceof Error ? err.message : 'An unexpected error occurred.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleToggleAdmin = async (member: StaffMember) => {
+    setActiveDropdownId(null);
+    try {
+      await updateUserAdmin(member.id, !member.isAdmin);
+      setStaffMembers(prev => prev.map(m => m.id === member.id ? { ...m, isAdmin: !member.isAdmin } : m));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update user.');
+    }
+  };
+
+  const handleDeleteUser = async (member: StaffMember) => {
+    setActiveDropdownId(null);
+    if (!confirm(`Are you sure you want to delete ${member.name}?`)) return;
+    try {
+      await deleteUser(member.id);
+      setStaffMembers(prev => prev.filter(m => m.id !== member.id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete user.');
     }
   };
 
@@ -207,14 +229,55 @@ export function UsersManagementScreen() {
                         </span>
                       </td>
                       <td>{member.lastActive}</td>
-                      <td>
-                        <button type="button" className="icon-button users-action-button" aria-label="Row actions">
+                      <td style={{ position: 'relative' }}>
+                        <button 
+                          type="button" 
+                          className="icon-button users-action-button" 
+                          aria-label="Row actions"
+                          onClick={() => setActiveDropdownId(activeDropdownId === member.id ? null : member.id)}
+                        >
                           <svg width="4" height="16" viewBox="0 0 4 16" fill="none" aria-hidden="true">
                             <circle cx="2" cy="2" r="1.5" fill="#475569" />
                             <circle cx="2" cy="8" r="1.5" fill="#475569" />
                             <circle cx="2" cy="14" r="1.5" fill="#475569" />
                           </svg>
                         </button>
+                        {activeDropdownId === member.id && (
+                          <div className="users-action-dropdown" style={{
+                            position: 'absolute',
+                            right: '32px',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: '#fff',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                            zIndex: 10,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            minWidth: '140px',
+                            padding: '4px'
+                          }}>
+                            <button 
+                              type="button" 
+                              style={{ padding: '8px 12px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', borderRadius: '4px' }}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                              onClick={() => handleToggleAdmin(member)}
+                            >
+                              {member.isAdmin ? 'Remove Admin' : 'Make Admin'}
+                            </button>
+                            <button 
+                              type="button" 
+                              style={{ padding: '8px 12px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', borderRadius: '4px', color: '#BA1A1A' }}
+                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fee2e2'}
+                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                              onClick={() => handleDeleteUser(member)}
+                            >
+                              Delete User
+                            </button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))
