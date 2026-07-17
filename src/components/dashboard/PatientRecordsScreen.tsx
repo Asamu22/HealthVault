@@ -18,7 +18,8 @@ export function PatientRecordsScreen({ records, onRecordClick }: PatientRecordsS
   }, [records, searchQuery]);
 
   function badgeStyle(s: string) {
-    if (s.toLowerCase().includes('restrict')) return { backgroundColor: 'rgba(186, 26, 26, 0.1)', color: '#BA1A1A' };
+    if (s.toLowerCase().includes('restrict') || s.toLowerCase().includes('critical'))
+      return { backgroundColor: 'rgba(186, 26, 26, 0.1)', color: '#BA1A1A' };
     return { backgroundColor: '#DFE8FF', color: '#091C35' };
   }
 
@@ -42,7 +43,7 @@ export function PatientRecordsScreen({ records, onRecordClick }: PatientRecordsS
         </div>
       </div>
 
-              <div className="records-table-container">
+      <div className="records-table-container">
         <table className="records-table">
           <thead>
             <tr className="table-header-row">
@@ -67,6 +68,13 @@ export function PatientRecordsScreen({ records, onRecordClick }: PatientRecordsS
                 <td className="table-cell">{r.status}</td>
               </tr>
             ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#737685' }}>
+                  No records match your search.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

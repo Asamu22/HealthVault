@@ -50,9 +50,19 @@ function mapRecord(row: SupabasePatientRecord): PatientRecordItem {
   };
 }
 
+// The backend verifies this token and looks up the caller's staff role to
+// evaluate ABAC policies for real — see backend/main.py _resolve_requester.
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
+
 export async function fetchPatientRecords(): Promise<PatientRecordItem[]> {
   try {
-    const response = await fetch(`${API_URL}/api/records/list`);
+    const token = await getAccessToken();
+    const response = await fetch(`${API_URL}/api/records/list`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
     if (!response.ok) {
       console.warn('Failed to fetch patient records from backend:', response.status);
       return [];
@@ -108,8 +118,10 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
   formData.append('author', record.author);
   formData.append('record_id', record.id);
 
+  const token = await getAccessToken();
   const response = await fetch(`${API_URL}/api/records/upload`, {
     method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: formData,
   });
 
@@ -123,9 +135,22 @@ export async function uploadPatientPdf(file: File, record: PatientRecordItem): P
   return mapRecord(payload.record as SupabasePatientRecord);
 }
 
-export function getRecordPdfUrl(filePath: string): string {
-  // Backend proxy serves the PDF with Content-Disposition: inline
-  return `${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}`;
+export async function fetchRecordPdfBlobUrl(filePath: string): Promise<string> {
+  // Authenticated fetch (header, not query token) so a 403 from ABAC
+  // enforcement is a real, catchable rejection -- not just JSON rendered
+  // inside an iframe with no way for the surrounding UI to react to it.
+  const token = await getAccessToken();
+  const response = await fetch(`${API_URL}/api/records/pdf-proxy?file_path=${encodeURIComponent(filePath)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.detail || `Unable to load PDF (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // ─── Staff Members ───────────────────────────────────────────────────────────

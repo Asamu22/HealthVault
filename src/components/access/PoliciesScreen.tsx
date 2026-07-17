@@ -6,12 +6,15 @@ import {
   type AccessPolicy,
   type PolicyCondition,
 } from '../../lib/supabase';
+import { SENSITIVITY_OPTIONS } from '../../lib/constants';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const ROLE_OPTIONS = ['Doctor', 'Physician', 'Nurse', 'Fellow', 'Resident', 'Pharmacist', 'Researcher'];
 const DEPARTMENT_OPTIONS = ['Any', 'Cardiology', 'Radiology', 'Oncology', 'Pharmacy', 'Emergency'];
 const ACTION_OPTIONS = ['Read (View Only)', 'Write (Modify)', 'Delete', 'Administer'];
-const SENSITIVITY_OPTIONS = ['Critical (PHI)', 'Confidential', 'Restricted', 'Public'];
+// SENSITIVITY_OPTIONS lives in src/lib/constants.ts, shared with the record
+// ingestion form (DashboardScreen) — must stay in sync so policies can only
+// reference sensitivity levels records can actually be tagged with.
 const ENVIRONMENT_OPTIONS = ['Any', 'During Active Shift Hours', 'Within Network', 'Outside Business Hours', 'Emergency Override'];
 const CONDITION_FIELD_OPTIONS = ['Subject Role', 'Action', 'Resource Sensitivity', 'Environment'] as const;
 type ConditionField = (typeof CONDITION_FIELD_OPTIONS)[number];

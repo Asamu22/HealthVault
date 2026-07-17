@@ -54,3 +54,11 @@ Notes
 - Do not expose `EMAILJS_PRIVATE_KEY` or `OTP_HASH_PEPPER` to the browser.
 - Replace the in-memory rate limiter with Redis in multi-instance deployments.
 - Replace JWT issuance with your production session logic if needed.
+- `/api/records/list`, `/api/records/pdf-url`, `/api/records/pdf-proxy`, and `/api/records/upload`
+  now enforce ABAC policies for real (see `_resolve_requester` / `_enforce_access` in `main.py`).
+  Each caller must have a valid Supabase Auth session AND a matching row in `staff_members`
+  (`staff_members.id` = `auth.users.id`) — that row's `role` is the ABAC `subject_role`. Callers
+  without both get a 401/403, and calls fail closed on any lookup error. There's currently no
+  real signal for the ABAC `environment` attribute (shift hours, network, etc.) at these
+  endpoints, so it's always evaluated as `'Any'` — policies scoped to a specific environment
+  won't be triggered by real record access yet, only by the manual evaluate/simulator panel.
