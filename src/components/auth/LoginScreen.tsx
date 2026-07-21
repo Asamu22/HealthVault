@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Button } from '../ui/Button';
 import { TextField } from '../ui/TextField';
-import { supabase, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, isSupabaseConfigured, fetchCurrentUserProfile } from '../../lib/supabase';
+import type { StaffMember } from '../../types';
 
 function ShieldIcon() {
   return (
@@ -59,7 +60,7 @@ function LockIcon() {
 }
 
 interface LoginScreenProps {
-  onLogin: (role: 'admin' | 'staff') => void;
+  onLogin: (role: 'admin' | 'staff', profile: StaffMember | null) => void;
 }
 
 type AuthRole = 'admin' | 'staff';
@@ -117,14 +118,13 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     }
 
     // Role must come only from the server-verified session metadata.
-    // Never infer it from client-typed text (email string match, clinician
-    // ID content, etc.) -- that was letting any staff login whose Clinician
-    // ID field still held the pre-filled admin default get treated as admin
-    // until a refresh corrected it against the real session.
-    const inferredRole: AuthRole = data.user?.user_metadata?.role === 'admin' ? 'admin' : 'staff';
+    // We also fetch the staff profile to check if they have admin privileges in the DB.
+    const profile = await fetchCurrentUserProfile();
+    const isMetadataAdmin = data.user?.user_metadata?.role === 'admin';
+    const inferredRole: AuthRole = isMetadataAdmin || profile?.isAdmin ? 'admin' : 'staff';
 
     setMessage(`Welcome back, ${loginEmail}. Redirecting to your dashboard now.`);
-    onLogin(inferredRole);
+    onLogin(inferredRole, profile);
   };
 
   return (

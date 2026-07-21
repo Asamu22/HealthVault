@@ -9,8 +9,8 @@ import { PatientRecordsScreen } from './components/dashboard/PatientRecordsScree
 import { UsersManagementScreen } from './components/users/UsersManagementScreen';
 import { AccessControlScreen } from './components/access/AccessControlScreen';
 import { PoliciesScreen } from './components/access/PoliciesScreen';
-import type { PatientRecordItem } from './types';
-import { supabase, fetchPatientRecords } from './lib/supabase';
+import type { PatientRecordItem, StaffMember } from './types';
+import { supabase, fetchPatientRecords, fetchCurrentUserProfile } from './lib/supabase';
 import { clearStoredOtpEmail } from './lib/otp';
 
 type AppRole = 'admin' | 'staff';
@@ -28,10 +28,11 @@ function SettingsView() {
 
 function App() {
   const [activeRole, setActiveRole] = useState<AppRole | null>(null);
+  const [currentUser, setCurrentUser] = useState<StaffMember | null>(null);
   const [needsMfa, setNeedsMfa] = useState(false);
   const [sessionRestored, setSessionRestored] = useState(false);
   const isAuthenticated = activeRole !== null;
-  const isAdmin = activeRole === 'admin';
+  const isAdmin = activeRole === 'admin' || currentUser?.isAdmin;
   const [isMobile, setIsMobile] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
@@ -75,7 +76,9 @@ function App() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
-          const role = session.user?.user_metadata?.role === 'admin' ? 'admin' : 'staff';
+          const profile = await fetchCurrentUserProfile();
+          setCurrentUser(profile);
+          const role = session.user?.user_metadata?.role === 'admin' || profile?.isAdmin ? 'admin' : 'staff';
           setActiveRole(role);
           setNeedsMfa(false);
         }
@@ -103,7 +106,8 @@ function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={(role) => {
+    return <LoginScreen onLogin={(role, profile) => {
+      setCurrentUser(profile);
       setActiveRole(role);
       setNeedsMfa(false);
       setAuthMessage(null);
@@ -136,6 +140,7 @@ function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setActiveRole(null);
+    setCurrentUser(null);
     clearStoredOtpEmail();
     setAuthMessage('You have successfully logged out.');
   };
@@ -153,7 +158,7 @@ function App() {
 
     return (
       <>
-        {selectedScreen === 'dashboard' && <DashboardScreen records={records} onRecordAdd={handleAddRecord} onRecordClick={setSelectedRecordId} onViewFullLog={() => setSelectedScreen('records')} />}
+        {selectedScreen === 'dashboard' && <DashboardScreen records={records} onRecordAdd={handleAddRecord} onRecordClick={setSelectedRecordId} onViewFullLog={() => setSelectedScreen('records')} authorName={currentUser?.name || 'System Administrator'} />}
         {selectedScreen === 'records' && <PatientRecordsScreen records={records} onRecordClick={(id: string) => setSelectedRecordId(id)} />}
         {selectedScreen === 'users' && isAdmin && <UsersManagementScreen />}
         {selectedScreen === 'audit' && isAdmin && <AuditScreen onRowClick={(recordId) => setSelectedRecordId(recordId)} />}
@@ -176,6 +181,8 @@ function App() {
           role={activeRole ?? 'user' as AppRole}
           onNavigate={handleNavigate}
           onLogout={handleLogout}
+          userName={currentUser?.name}
+          userInitials={currentUser?.initials}
         />
         <div className="content-column">
           <header className="mobile-header">
@@ -208,7 +215,14 @@ function App() {
 
   return (
     <div className="app-shell-grid">
-      <SideNavBar activeScreen={selectedScreen} role={activeRole ?? 'staff'} onNavigate={handleNavigate} onLogout={handleLogout} />
+      <SideNavBar 
+        activeScreen={selectedScreen} 
+        role={activeRole ?? 'staff'} 
+        onNavigate={handleNavigate} 
+        onLogout={handleLogout}
+        userName={currentUser?.name}
+        userInitials={currentUser?.initials}
+      />
       <div className="content-column">
         {authMessage ? <div className="login-note">{authMessage}</div> : null}
         {renderContent()}

@@ -156,7 +156,20 @@ function EditModal({ policy, onClose, onSaved }: EditModalProps) {
                 <select className="access-select" style={{ flex: 1 }} value={c.value} onChange={(e) => updateCondValue(c.id, e.target.value)}>
                   {CONDITION_VALUE_OPTIONS[c.field as ConditionField]?.map((o) => <option key={o}>{o}</option>)}
                 </select>
-                <button type="button" onClick={() => removeCond(c.id)} style={{ border: 'none', background: 'transparent', color: '#BA1A1A', cursor: 'pointer', fontSize: 16, padding: '0 4px' }}>✕</button>
+                <button 
+                  type="button" 
+                  onClick={() => removeCond(c.id)} 
+                  style={{ border: 'none', background: 'transparent', color: '#BA1A1A', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '4px', transition: 'background 0.2s' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#ffe5e5'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  title="Remove condition"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 6h18"></path>
+                    <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                    <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                  </svg>
+                </button>
               </div>
             ))}
             <button type="button" className="condition-add-button" onClick={addCondition}>+ Add condition</button>
@@ -250,31 +263,44 @@ export function PoliciesScreen() {
       </div>
 
       {/* Filters */}
-      <div className="policies-filters panel-card">
-        <input
-          className="policies-search"
-          type="search"
-          placeholder="Search by name, role, department…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <label className="field-label" style={{ marginBottom: 0 }}>
-          Effect
-          <select className="access-select" value={filterEffect} onChange={(e) => setFilterEffect(e.target.value as typeof filterEffect)}>
-            <option value="all">All</option>
-            <option value="allow">Allow</option>
-            <option value="deny">Deny</option>
-          </select>
-        </label>
-        <label className="field-label" style={{ marginBottom: 0 }}>
-          Mode
-          <select className="access-select" value={filterDryRun} onChange={(e) => setFilterDryRun(e.target.value as typeof filterDryRun)}>
-            <option value="all">All</option>
-            <option value="live">Live only</option>
-            <option value="dry">Dry-run only</option>
-          </select>
-        </label>
-        <span className="policies-count">{filtered.length} showing</span>
+      <div className="policies-filters panel-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-end' }}>
+          <label className="field-label" style={{ marginBottom: 0, flex: 1, minWidth: '250px' }}>
+            Search Policies
+            <div className="search-input-wrap" style={{ position: 'relative', marginTop: '6px' }}>
+              <input
+                className="policies-search"
+                type="search"
+                placeholder="Search by name, role, department…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#737685' }}>🔍</span>
+            </div>
+          </label>
+          <label className="field-label" style={{ marginBottom: 0, minWidth: '160px' }}>
+            Effect
+            <select className="access-select" value={filterEffect} onChange={(e) => setFilterEffect(e.target.value as typeof filterEffect)} style={{ marginTop: '6px', width: '100%' }}>
+              <option value="all">All Effects</option>
+              <option value="allow">Allow</option>
+              <option value="deny">Deny</option>
+            </select>
+          </label>
+          <label className="field-label" style={{ marginBottom: 0, minWidth: '160px' }}>
+            Mode
+            <select className="access-select" value={filterDryRun} onChange={(e) => setFilterDryRun(e.target.value as typeof filterDryRun)} style={{ marginTop: '6px', width: '100%' }}>
+              <option value="all">All Modes</option>
+              <option value="live">Live only</option>
+              <option value="dry">Dry-run only</option>
+            </select>
+          </label>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #ebedf5', paddingTop: '12px' }}>
+          <span className="policies-count" style={{ marginLeft: 0, fontSize: '13px', color: '#434654', fontWeight: 500 }}>
+            {filtered.length} {filtered.length === 1 ? 'policy' : 'policies'} found
+          </span>
+        </div>
       </div>
 
       {/* Table */}
