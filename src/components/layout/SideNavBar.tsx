@@ -130,9 +130,11 @@ interface SideNavBarProps {
   role?: 'admin' | 'staff';
   onNavigate?: (screen: string) => void;
   onLogout?: () => void;
+  userName?: string;
+  userInitials?: string;
 }
 
-export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScreen = 'dashboard', role = 'admin', onNavigate, onLogout }: SideNavBarProps) {
+export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScreen = 'dashboard', role = 'admin', onNavigate, onLogout, userName, userInitials }: SideNavBarProps) {
   const mainNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
     { id: 'records', label: 'Patient Records', icon: <PatientRecordsIcon /> },
@@ -155,10 +157,10 @@ export function SideNavBar({ mobile = false, isOpen = true, onClose, activeScree
       {/* Header Info Section */}
       <div className="side-nav-header">
         <div className="side-nav-avatar">
-          <span className="avatar-initials">JV</span>
+          <span className="avatar-initials">{userInitials || 'U'}</span>
         </div>
         <div className="side-nav-user-info">
-          <h2 className="side-nav-user-name">Dr. Julian Vane</h2>
+          <h2 className="side-nav-user-name">{userName || 'Unknown User'}</h2>
           <p className="side-nav-user-role">{role === 'admin' ? 'Admin | Full Access' : 'Staff | Limited Access'}</p>
         </div>
       </div>

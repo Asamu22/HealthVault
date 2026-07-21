@@ -201,6 +201,23 @@ export async function fetchStaffMembers(): Promise<StaffMember[]> {
   }
 }
 
+export async function fetchCurrentUserProfile(): Promise<StaffMember | null> {
+  try {
+    const token = await getAccessToken();
+    const response = await fetch(`${API_URL}/api/users/me`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const payload = await response.json();
+    return mapStaff(payload as SupabaseStaffMember);
+  } catch (err) {
+    console.warn('fetchCurrentUserProfile error:', err);
+    return null;
+  }
+}
+
 export interface CreateStaffPayload {
   fullName: string;
   email: string;

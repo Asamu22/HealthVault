@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import httpx
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
@@ -30,6 +32,11 @@ OTP_ENABLED = os.environ.get('OTP_ENABLED', 'false').strip().lower() in ('1', 't
 JWT_SECRET = os.environ.get('OTP_JWT_SECRET', 'dev-secret')
 JWT_ALG = 'HS256'
 STORAGE_BUCKET = os.environ.get('SUPABASE_RECORDS_BUCKET', 'patient-records').strip() or 'patient-records'
+
+raw_aes_key = os.environ.get('AES_SECRET_KEY', '0123456789abcdef0123456789abcdef')
+if len(raw_aes_key) != 32:
+    raise RuntimeError('AES_SECRET_KEY must be exactly 32 bytes (characters) long')
+AES_SECRET_KEY = raw_aes_key.encode('utf-8')
 
 if not PEPPER:
     raise RuntimeError('Missing OTP_HASH_PEPPER environment variable')
@@ -509,17 +516,27 @@ async def proxy_pdf(file_path: str, request: Request):
     if not signed_url:
         raise HTTPException(status_code=500, detail='Empty signed URL returned from storage.')
 
-    # 2. Fetch the PDF bytes and stream them with inline disposition
+    # 2. Fetch the PDF bytes, decrypt, and stream them with inline disposition
     filename = file_path.split('/')[-1] or 'document.pdf'
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             upstream = await client.get(signed_url)
             upstream.raise_for_status()
-            pdf_bytes = upstream.content
+            encrypted_payload = upstream.content
+            
+        if len(encrypted_payload) < 12:
+            raise HTTPException(status_code=500, detail='Encrypted payload too short (missing nonce).')
+            
+        nonce = encrypted_payload[:12]
+        ciphertext = encrypted_payload[12:]
+        aesgcm = AESGCM(AES_SECRET_KEY)
+        pdf_bytes = aesgcm.decrypt(nonce, ciphertext, None)
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=f'Storage returned {exc.response.status_code}.') from exc
+    except InvalidTag:
+        raise HTTPException(status_code=500, detail='Decryption failed (Invalid Tag). File may be unencrypted or corrupted.')
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f'Failed to fetch PDF: {exc}') from exc
+        raise HTTPException(status_code=500, detail=f'Failed to fetch or decrypt PDF: {exc}') from exc
 
     return StreamingResponse(
         iter([pdf_bytes]),
@@ -579,9 +596,32 @@ async def upload_record_pdf(
     file_bytes = await file.read()
     object_path = f"records/{record_id}/{file.filename}"
     try:
-        sb.storage.from_(STORAGE_BUCKET).upload(object_path, file_bytes)
+        nonce = os.urandom(12)
+        aesgcm = AESGCM(AES_SECRET_KEY)
+        ciphertext = aesgcm.encrypt(nonce, file_bytes, None)
+        encrypted_payload = nonce + ciphertext
+        
+        import tempfile
+        import os as temp_os
+        
+        # Write to a temporary file to bypass httpx streaming bugs on Windows
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(encrypted_payload)
+            tmp_path = tmp.name
+            
+        try:
+            file_options = {"content-type": "application/octet-stream"}
+            sb.storage.from_(STORAGE_BUCKET).upload(
+                object_path, 
+                tmp_path, 
+                file_options
+            )
+        finally:
+            temp_os.remove(tmp_path)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f'Unable to upload PDF to storage: {exc}') from exc
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f'Unable to encrypt or upload PDF to storage: {exc}') from exc
 
     metadata_payload = {
         'id': record_id,
@@ -679,6 +719,51 @@ async def list_staff():
         return {'staff_members': result.data or []}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'Unable to fetch staff: {exc}') from exc
+
+
+@users_router.get('/me')
+async def get_me(request: Request):
+    token = None
+    auth_header = request.headers.get('authorization', '')
+    if auth_header.lower().startswith('bearer '):
+        token = auth_header[7:].strip()
+    
+    if not token:
+        raise HTTPException(status_code=401, detail='Missing authentication token.')
+
+    try:
+        user_response = sb.auth.get_user(token)
+        user = user_response.user if user_response else None
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail='Invalid session.') from exc
+
+    if not user:
+        raise HTTPException(status_code=401, detail='Invalid session.')
+
+    try:
+        result = sb.table('staff_members').select('*').eq('id', str(user.id)).limit(1).execute()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f'Unable to query staff profile: {exc}') from exc
+
+    rows = result.data or []
+    is_admin_meta = user.user_metadata.get('role') == 'admin' if user.user_metadata else False
+    
+    if not rows:
+        return {
+            'id': str(user.id),
+            'name': 'Super Admin' if is_admin_meta else 'System User',
+            'email': user.email,
+            'role': 'System Administrator' if is_admin_meta else 'Staff',
+            'is_admin': is_admin_meta,
+            'status': 'Active'
+        }
+    
+    # If they are superadmin via metadata, force is_admin to True
+    profile = rows[0]
+    if is_admin_meta:
+        profile['is_admin'] = True
+        
+    return profile
 
 
 class UpdateUserAdminBody(BaseModel):

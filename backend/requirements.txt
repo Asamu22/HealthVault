@@ -6,3 +6,4 @@ python-dotenv
 pyjwt
 email-validator
 python-multipart
+cryptography

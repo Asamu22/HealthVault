@@ -10,6 +10,7 @@ interface DashboardScreenProps {
   onRecordAdd: (record: PatientRecordItem) => void;
   onRecordClick: (recordId: string) => void;
   onViewFullLog: () => void;
+  authorName?: string;
 }
 
 // SVG Icons
@@ -97,7 +98,7 @@ function EncryptionStatus({ status }: { status: string }) {
   );
 }
 
-export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFullLog }: DashboardScreenProps) {
+export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFullLog, authorName }: DashboardScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [patientName, setPatientName] = useState('');
@@ -195,7 +196,7 @@ export function DashboardScreen({ records, onRecordAdd, onRecordClick, onViewFul
       encryption: 'AES-GCM',
       department,
       date: new Date().toLocaleDateString(),
-      author: 'Current User',
+      author: authorName || 'Current User',
       filePath,
       fileName: selectedFile.name,
       createdAt,
